@@ -10,6 +10,8 @@ $ClaudeInstallUrl = "https://claude.ai/install.ps1"
 $DeepSeekApiKeyUrl = "https://platform.deepseek.com/api_keys"
 $DefaultModel = "deepseek-v4-pro"
 $ConfigDir = Join-Path $env:USERPROFILE ".easyai"
+$ClaudeConfigDir = Join-Path $env:USERPROFILE ".claude"
+$ClaudeSettingsPath = Join-Path $ClaudeConfigDir "settings.json"
 $LogPath = Join-Path $ConfigDir "deepseek-installer.log"
 $MissingText = "未安装"
 $script:UrgentPopupKeys = @{}
@@ -32,6 +34,12 @@ function Ensure-ConfigDir {
     }
 }
 
+function Ensure-ClaudeConfigDir {
+    if (-not (Test-Path -LiteralPath $ClaudeConfigDir)) {
+        New-Item -ItemType Directory -Path $ClaudeConfigDir -Force | Out-Null
+    }
+}
+
 function Pump-Ui {
     if ($script:Window) {
         $script:Window.Dispatcher.Invoke([Action]{}, [Windows.Threading.DispatcherPriority]::Background)
@@ -47,7 +55,27 @@ function Write-Log {
     Add-Content -LiteralPath $LogPath -Value $line -Encoding UTF8
 
     if ($script:LogBox) {
-        $script:LogBox.AppendText($Message + [Environment]::NewLine)
+        $brush = "#E5E7EB"
+        if ($Message -match "^[=]{20,}|^\[阶段\]") {
+            $brush = "#F8FAFC"
+        } elseif ($Message -match "^---- ") {
+            $brush = "#60A5FA"
+        } elseif ($Message -match "^> ") {
+            $brush = "#FBBF24"
+        } elseif ($Message -match "校验通过|安装完成|连接测试成功|配置已保存|已更新|已备份|可访问") {
+            $brush = "#34D399"
+        } elseif ($Message -match "失败|不可用|异常|取消|退出码: [1-9]") {
+            $brush = "#F87171"
+        } elseif ($Message -match "命令输出|测试模型|Base URL|模型:|配置文件|备份文件|下一步|Claude Code:|DeepSeek 配置:|Claude 官方下载:") {
+            $brush = "#C084FC"
+        }
+
+        $paragraph = New-Object System.Windows.Documents.Paragraph
+        $paragraph.Margin = [System.Windows.Thickness]::new(0)
+        $run = New-Object System.Windows.Documents.Run($Message)
+        $run.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString($brush)
+        $paragraph.Inlines.Add($run) | Out-Null
+        $script:LogBox.Document.Blocks.Add($paragraph)
         $script:LogBox.ScrollToEnd()
         Pump-Ui
     }
@@ -56,7 +84,41 @@ function Write-Log {
 function Write-LogSection {
     param([string]$Title)
     Write-Log ""
-    Write-Log ("========== " + $Title + " ==========")
+    Write-Log "============================================================"
+    Write-Log ("[阶段] " + $Title)
+    Write-Log "============================================================"
+}
+
+function Write-LogStep {
+    param([string]$Title)
+    Write-Log ("---- " + $Title + " ----")
+}
+
+function Set-ResultSummary {
+    param(
+        [string]$Stage = $null,
+        [string]$Result = $null,
+        [string]$SettingsPath = $null,
+        [string]$BackupPath = $null,
+        [string]$NextAction = $null
+    )
+
+    if ($null -ne $Stage -and $script:SummaryStageValue) {
+        $script:SummaryStageValue.Text = $Stage
+    }
+    if ($null -ne $Result -and $script:SummaryResultValue) {
+        $script:SummaryResultValue.Text = $Result
+    }
+    if ($null -ne $SettingsPath -and $script:SummaryPathValue) {
+        $script:SummaryPathValue.Text = $SettingsPath
+    }
+    if ($null -ne $BackupPath -and $script:SummaryBackupValue) {
+        $script:SummaryBackupValue.Text = $BackupPath
+    }
+    if ($null -ne $NextAction -and $script:SummaryNextValue) {
+        $script:SummaryNextValue.Text = $NextAction
+    }
+    Pump-Ui
 }
 
 function Set-Status {
@@ -66,24 +128,57 @@ function Set-Status {
         $script:StatusText.Text = $Message
         Pump-Ui
     }
+    Set-ResultSummary -Stage $Message
+    if ($script:ProgressStatusText) {
+        $script:ProgressStatusText.Text = $Message
+        Pump-Ui
+    }
 }
 
 function Set-Progress {
     param([int]$Value)
 
+    $progressValue = [Math]::Max(0, [Math]::Min(100, $Value))
     if ($script:ProgressBar) {
-        $script:ProgressBar.Value = [Math]::Max(0, [Math]::Min(100, $Value))
+        $script:ProgressBar.Value = $progressValue
         Pump-Ui
+    }
+    if ($script:ProgressPopupBar) {
+        $script:ProgressPopupBar.Value = $progressValue
+        Pump-Ui
+    }
+}
+
+function Show-ProgressPopup {
+    if (-not $script:ProgressWindow) {
+        return
+    }
+    if (-not $script:ProgressWindow.IsVisible) {
+        $script:ProgressWindow.Owner = $script:Window
+        $script:ProgressWindow.WindowStartupLocation = "CenterOwner"
+        $script:ProgressWindow.Show()
+    }
+    Pump-Ui
+}
+
+function Hide-ProgressPopup {
+    if ($script:ProgressWindow -and $script:ProgressWindow.IsVisible) {
+        $script:ProgressWindow.Hide()
     }
 }
 
 function Set-Busy {
     param([bool]$Busy)
 
-    foreach ($button in @($script:BtnInstallOnly, $script:BtnFull, $script:BtnConfigOnly, $script:BtnTest, $script:BtnRefresh)) {
+    foreach ($button in @($script:BtnInstallOnly, $script:BtnFull, $script:BtnConfigOnly, $script:BtnTest, $script:BtnRefresh, $script:BtnSaveKey, $script:BtnOpenKey, $script:BtnLogs)) {
         if ($button) {
             $button.IsEnabled = -not $Busy
         }
+    }
+    if ($Busy) {
+        Show-ProgressPopup
+    } else {
+        Hide-ProgressPopup
     }
     Pump-Ui
 }
@@ -159,15 +254,19 @@ function Invoke-External {
         [string[]]$Arguments
     )
 
+    Write-LogStep ("执行命令: " + $File)
     Write-Log ("> " + $File + " " + ($Arguments -join " "))
     try {
         $output = & $File @Arguments 2>&1 | Out-String
         if ($output.Trim()) {
+            Write-LogStep "命令输出"
             Write-Log $output.Trim()
         }
         if ($null -eq $LASTEXITCODE) {
+            Write-Log ("命令退出码: 0")
             return 0
         }
+        Write-Log ("命令退出码: " + [int]$LASTEXITCODE)
         return [int]$LASTEXITCODE
     } catch {
         Write-Log ("命令执行失败：" + $_.Exception.Message)
@@ -191,6 +290,214 @@ function Set-UserEnv {
     }
 }
 
+function Get-ObjectPropertyValue {
+    param(
+        $Object,
+        [string]$Name
+    )
+
+    if ($null -eq $Object) {
+        return $null
+    }
+
+    if ($Object -is [System.Collections.IDictionary]) {
+        return $Object[$Name]
+    }
+
+    $property = $Object.PSObject.Properties[$Name]
+    if ($property) {
+        return $property.Value
+    }
+
+    return $null
+}
+
+function Set-ObjectPropertyValue {
+    param(
+        $Object,
+        [string]$Name,
+        $Value
+    )
+
+    if ($Object -is [System.Collections.IDictionary]) {
+        $Object[$Name] = $Value
+        return
+    }
+
+    if ($Object.PSObject.Properties[$Name]) {
+        $Object.$Name = $Value
+    } else {
+        $Object | Add-Member -NotePropertyName $Name -NotePropertyValue $Value
+    }
+}
+
+function New-ClaudeSettingsBackupPath {
+    $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    return (Join-Path $ClaudeConfigDir ("settings.backup-{0}.json" -f $stamp))
+}
+
+function Get-ClaudeEnvMap {
+    param(
+        [string]$ApiKey,
+        [string]$Model
+    )
+
+    $envMap = [ordered]@{
+        ANTHROPIC_BASE_URL = $DeepSeekBaseUrl
+        ANTHROPIC_AUTH_TOKEN = $ApiKey
+        ANTHROPIC_MODEL = $Model
+        ANTHROPIC_DEFAULT_OPUS_MODEL = $Model
+        ANTHROPIC_DEFAULT_SONNET_MODEL = $Model
+        ANTHROPIC_DEFAULT_HAIKU_MODEL = $Model
+        CLAUDE_CODE_SUBAGENT_MODEL = $Model
+        CLAUDE_CODE_EFFORT_LEVEL = "think"
+    }
+
+    if ($script:CompatCheck.IsChecked) {
+        $envMap["ANTHROPIC_API_KEY"] = $ApiKey
+        $envMap["DEEPSEEK_API_KEY"] = $ApiKey
+    }
+
+    return $envMap
+}
+
+function Read-ClaudeSettings {
+    if (-not (Test-Path -LiteralPath $ClaudeSettingsPath)) {
+        return [pscustomobject]@{}
+    }
+
+    $raw = Get-Content -LiteralPath $ClaudeSettingsPath -Raw -Encoding UTF8
+    if (-not $raw.Trim()) {
+        return [pscustomobject]@{}
+    }
+
+    try {
+        return ($raw | ConvertFrom-Json -ErrorAction Stop)
+    } catch {
+        throw ("Claude 设置文件不是有效 JSON：{0}" -f $_.Exception.Message)
+    }
+}
+
+function Save-ClaudeSettings {
+    param(
+        [string]$ApiKey,
+        [string]$Model
+    )
+
+    Ensure-ClaudeConfigDir
+    $settings = Read-ClaudeSettings
+    $envSettings = Get-ObjectPropertyValue $settings "env"
+    if ($null -eq $envSettings -or $envSettings -is [string] -or $envSettings -is [ValueType]) {
+        $envSettings = [pscustomobject]@{}
+        Set-ObjectPropertyValue $settings "env" $envSettings
+    }
+
+    Write-LogStep "合并 settings.json"
+    foreach ($entry in (Get-ClaudeEnvMap $ApiKey $Model).GetEnumerator()) {
+        Set-ObjectPropertyValue $envSettings $entry.Key $entry.Value
+        if ($entry.Key -match "KEY|TOKEN") {
+            Write-Log ("settings.json env 已写入 " + $entry.Key + "=****")
+        } else {
+            Write-Log ("settings.json env 已写入 " + $entry.Key + "=" + $entry.Value)
+        }
+    }
+
+    $backupPath = $null
+    if (Test-Path -LiteralPath $ClaudeSettingsPath) {
+        Write-LogStep "备份现有 settings.json"
+        $backupPath = New-ClaudeSettingsBackupPath
+        Copy-Item -LiteralPath $ClaudeSettingsPath -Destination $backupPath -Force
+        Write-Log ("已备份现有 Claude 设置: " + $backupPath)
+    }
+
+    Write-LogStep "写入新的 settings.json"
+    $json = $settings | ConvertTo-Json -Depth 20
+    Set-Content -LiteralPath $ClaudeSettingsPath -Value $json -Encoding UTF8
+    Write-Log ("Claude 设置已更新: " + $ClaudeSettingsPath)
+
+    return $backupPath
+}
+
+function Confirm-ClaudeSettingsOverwrite {
+    if (-not (Test-Path -LiteralPath $ClaudeSettingsPath)) {
+        return $true
+    }
+
+    $message = @"
+检测到本机已经存在 Claude 配置文件：
+
+$ClaudeSettingsPath
+
+继续写入会：
+1. 保留原文件备份；
+2. 合并 EasyAi 需要的模型配置；
+3. 覆盖同名字段。
+
+是否继续？
+"@
+
+    $result = [System.Windows.MessageBox]::Show(
+        $script:Window,
+        $message,
+        "重要确认：发现现有 Claude 配置",
+        "YesNo",
+        "Warning"
+    )
+
+    return ($result -eq [System.Windows.MessageBoxResult]::Yes)
+}
+
+function Show-ConfigSavedResult {
+    param(
+        [string]$SettingsPath,
+        [string]$BackupPath
+    )
+
+    $message = "Claude / DeepSeek 配置写入完成。`n`n配置文件位置：`n$SettingsPath"
+    if ($BackupPath) {
+        $message += "`n`n原文件备份：`n$BackupPath"
+    }
+    $message += "`n`n请新打开终端后使用 claude。"
+
+    Set-ResultSummary -Result "配置已写入" -SettingsPath $SettingsPath -BackupPath ($(if ($BackupPath) { $BackupPath } else { "未生成备份" })) -NextAction "新开终端后运行 claude。"
+    Show-Info $message
+}
+
+function Get-DeepSeekConfigState {
+    try {
+        $settings = Read-ClaudeSettings
+        $envSettings = Get-ObjectPropertyValue $settings "env"
+        $settingsBaseUrl = [string](Get-ObjectPropertyValue $envSettings "ANTHROPIC_BASE_URL")
+        $settingsToken = [string](Get-ObjectPropertyValue $envSettings "ANTHROPIC_AUTH_TOKEN")
+        if ($settingsBaseUrl -eq $DeepSeekBaseUrl -and $settingsToken) {
+            return [pscustomobject]@{
+                IsConfigured = $true
+                StatusText = "已配置（settings.json）"
+            }
+        }
+    } catch {
+        Write-Log $_.Exception.Message
+        return [pscustomobject]@{
+            IsConfigured = $false
+            StatusText = "配置文件异常"
+        }
+    }
+
+    $legacyBaseUrl = [Environment]::GetEnvironmentVariable("ANTHROPIC_BASE_URL", "User")
+    $legacyToken = [Environment]::GetEnvironmentVariable("ANTHROPIC_AUTH_TOKEN", "User")
+    if ($legacyBaseUrl -eq $DeepSeekBaseUrl -and $legacyToken) {
+        return [pscustomobject]@{
+            IsConfigured = $true
+            StatusText = "已配置（旧环境变量）"
+        }
+    }
+
+    return [pscustomobject]@{
+        IsConfigured = $false
+        StatusText = "未配置"
+    }
+}
+
 function Test-DeepSeekApiKey {
     param([string]$ApiKey, [string]$Model)
 
@@ -201,6 +508,7 @@ function Test-DeepSeekApiKey {
     Write-Log ("验证接口: " + $DeepSeekBaseUrl + "/v1/messages")
     Write-Log ("模型: " + $Model)
     Write-Log ("API Key: " + (Mask-Secret $ApiKey))
+    Write-LogStep "发送最小请求"
     Write-Log "正在发送最小消息请求，用于确认 Key、余额和网络是否可用。"
 
     $headers = @{
@@ -273,6 +581,7 @@ function Confirm-DeepSeekApiKey {
     $ok = Test-DeepSeekApiKey $ApiKey $Model
     Set-Busy $false
     if ($ok) {
+        Set-ResultSummary -Result "API Key 校验通过" -NextAction "可以继续安装、配置或测试 Claude。"
         if ($ShowSuccessPopup) {
             [System.Windows.MessageBox]::Show(
                 $script:Window,
@@ -283,6 +592,7 @@ function Confirm-DeepSeekApiKey {
             ) | Out-Null
         }
     } else {
+        Set-ResultSummary -Result "API Key 校验失败" -NextAction "检查 Key、余额和网络后重试。"
         Show-Warn "DeepSeek API Key 校验失败。`n`n请检查：`n1. API Key 是否复制完整；`n2. DeepSeek 账户是否有余额；`n3. 当前网络是否能访问 api.deepseek.com。"
     }
     return $ok
@@ -291,6 +601,7 @@ function Confirm-DeepSeekApiKey {
 function Test-ClaudeInstallerAccess {
     Write-LogSection "Claude Code 官方下载检测"
     Write-Log ("安装脚本地址: " + $ClaudeInstallUrl)
+    Write-LogStep "检查官方下载地址"
     Set-Status "正在检查 Claude 官方下载..."
     try {
         $response = Invoke-WebRequest -Uri $ClaudeInstallUrl -UseBasicParsing -TimeoutSec 15
@@ -356,18 +667,22 @@ function Install-ClaudeCodeNative {
     Set-Progress 8
 
     $current = Get-ToolVersion "claude"
+    Write-LogStep "检查本机安装状态"
     Write-Log ("当前 Claude Code 状态: " + $current)
     if ($current -ne $MissingText) {
         Write-Log ("Claude Code 已安装：" + $current)
+        Set-ResultSummary -Result "Claude Code 已安装" -NextAction "可以直接配置模型或测试连接。"
         Set-Progress 100
         Set-Busy $false
         return $true
     }
 
     $access = Test-ClaudeInstallerAccess
+    Write-LogStep "确认官方下载可用性"
     $script:DownloadStatus.Text = $access
     Write-Log ("Claude 官方下载检测：" + $access)
     if ($access -match "地区不可用") {
+        Set-ResultSummary -Result "官方下载不可用" -NextAction "可在已安装 Claude Code 的电脑上只配置模型。"
         Show-DownloadAccessPopupIfNeeded $access $true
         Set-Progress 100
         Set-Busy $false
@@ -384,6 +699,7 @@ function Install-ClaudeCodeNative {
     Write-Log ("PowerShell: " + $ps)
     Write-Log "使用 Claude Code 官方原生安装器。默认不安装 Node.js，也不安装 Git。"
     Set-Progress 28
+    Write-LogStep "运行官方安装器"
     $code = Invoke-External $ps @(
         "-NoProfile",
         "-ExecutionPolicy", "Bypass",
@@ -392,10 +708,12 @@ function Install-ClaudeCodeNative {
 
     Set-Progress 70
     Refresh-ProcessPath
+    Write-LogStep "安装后复检"
     $installed = Get-ToolVersion "claude"
     Write-Log ("官方安装后检测结果: " + $installed)
     if ($installed -ne $MissingText) {
         Write-Log ("Claude Code 安装完成：" + $installed)
+        Set-ResultSummary -Result "Claude Code 安装完成" -NextAction "下一步可继续写入模型配置。"
         Set-Progress 100
         Set-Busy $false
         return $true
@@ -403,6 +721,7 @@ function Install-ClaudeCodeNative {
 
     Write-Log "官方脚本未检测到 claude 命令，尝试 WinGet 备用安装方式。"
     if (Get-Command winget -ErrorAction SilentlyContinue) {
+        Write-LogStep "尝试 WinGet 备用安装"
         $wingetCode = Invoke-External "winget" @(
             "install",
             "--id", "Anthropic.ClaudeCode",
@@ -415,6 +734,7 @@ function Install-ClaudeCodeNative {
         Write-Log ("WinGet 安装后检测结果: " + $installed)
         if ($installed -ne $MissingText) {
             Write-Log ("Claude Code 安装完成：" + $installed)
+            Set-ResultSummary -Result "Claude Code 安装完成" -NextAction "下一步可继续写入模型配置。"
             Set-Progress 100
             Set-Busy $false
             return $true
@@ -440,34 +760,49 @@ function Save-DeepSeekConfig {
     Set-Busy $true
     Set-Status "正在配置 DeepSeek V4 Pro..."
     Set-Progress 20
+    Write-LogStep "准备写入模型配置"
     Write-Log ("Base URL: " + $DeepSeekBaseUrl)
     Write-Log ("模型: " + $Model)
-    Write-Log ("配置文件目录: " + $ConfigDir)
+    Write-Log ("Claude 设置文件: " + $ClaudeSettingsPath)
 
-    Set-UserEnv "ANTHROPIC_BASE_URL" $DeepSeekBaseUrl
-    Set-UserEnv "ANTHROPIC_AUTH_TOKEN" $ApiKey
-    Set-UserEnv "ANTHROPIC_MODEL" $Model
-    Set-UserEnv "ANTHROPIC_DEFAULT_OPUS_MODEL" $Model
-    Set-UserEnv "ANTHROPIC_DEFAULT_SONNET_MODEL" $Model
-    Set-UserEnv "ANTHROPIC_DEFAULT_HAIKU_MODEL" $Model
-    Set-UserEnv "CLAUDE_CODE_SUBAGENT_MODEL" $Model
-    Set-UserEnv "CLAUDE_CODE_EFFORT_LEVEL" "think"
+    if (-not (Confirm-ClaudeSettingsOverwrite)) {
+        Write-Log "用户取消写入：检测到现有 Claude 配置文件。"
+        Set-ResultSummary -Result "已取消写入" -NextAction "如需覆盖现有配置，请重新执行并确认。"
+        Set-Status "已取消写入"
+        Set-Progress 100
+        Set-Busy $false
+        return $false
+    }
 
-    if ($script:CompatCheck.IsChecked) {
-        Set-UserEnv "ANTHROPIC_API_KEY" $ApiKey
-        Set-UserEnv "DEEPSEEK_API_KEY" $ApiKey
+    try {
+        Write-LogStep "写入 Claude 配置文件"
+        $backupPath = Save-ClaudeSettings $ApiKey $Model
+    } catch {
+        Write-Log ("写入 Claude 设置失败：" + $_.Exception.Message)
+        Show-Warn "Claude 设置写入失败。`n`n请检查 ~/.claude/settings.json 是否被占用，或者里面是不是无效 JSON。"
+        Set-Progress 100
+        Set-Busy $false
+        return $false
     }
 
     Ensure-ConfigDir
+    Write-LogStep "写入 EasyAi 本地记录"
     $config = [ordered]@{
         base_url = $DeepSeekBaseUrl
         model = $Model
+        claude_settings_path = $ClaudeSettingsPath
+        claude_settings_backup = $backupPath
         updated_at = (Get-Date).ToString("s")
     }
     $config | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $ConfigDir "deepseek-installer.json") -Encoding UTF8
 
     Set-Progress 100
-    Write-Log "DeepSeek V4 Pro 配置已保存。请新开终端后使用 claude。"
+    if ($backupPath) {
+        Write-Log ("DeepSeek V4 Pro 配置已保存，原 Claude 设置已备份到: " + $backupPath)
+    } else {
+        Write-Log "DeepSeek V4 Pro 配置已保存。"
+    }
+    Show-ConfigSavedResult $ClaudeSettingsPath $backupPath
     Set-Busy $false
     return $true
 }
@@ -483,6 +818,7 @@ function Test-ClaudeCode {
     Set-Busy $true
     Set-Status "正在测试连接..."
     Set-Progress 20
+    Write-LogStep "准备测试 Claude 调用"
     Write-Log ("测试模型: " + $Model)
 
     if (-not $SkipApiKeyCheck -and -not (Test-DeepSeekApiKey $ApiKey $Model)) {
@@ -509,6 +845,7 @@ function Test-ClaudeCode {
     }
 
     Refresh-ProcessPath
+    Write-LogStep "检查 claude 命令"
     $claudeVersion = Get-ToolVersion "claude"
     Write-Log ("Claude Code 状态: " + $claudeVersion)
     if ($claudeVersion -eq $MissingText) {
@@ -519,27 +856,26 @@ function Test-ClaudeCode {
         return $false
     }
 
-    $env:ANTHROPIC_BASE_URL = $DeepSeekBaseUrl
-    $env:ANTHROPIC_AUTH_TOKEN = $ApiKey
-    $env:ANTHROPIC_MODEL = $Model
-    $env:ANTHROPIC_DEFAULT_OPUS_MODEL = $Model
-    $env:ANTHROPIC_DEFAULT_SONNET_MODEL = $Model
-    $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = $Model
-    $env:CLAUDE_CODE_SUBAGENT_MODEL = $Model
-    $env:CLAUDE_CODE_EFFORT_LEVEL = "think"
-    Write-Log "已为当前测试进程注入 DeepSeek 环境变量。"
+    foreach ($entry in (Get-ClaudeEnvMap $ApiKey $Model).GetEnumerator()) {
+        Set-Item -Path ("Env:\" + $entry.Key) -Value $entry.Value
+    }
+    Write-LogStep "注入当前测试进程配置"
+    Write-Log "已为当前测试进程注入 Claude/DeepSeek 配置。"
 
-    $code = Invoke-External "claude" @("--print", "请用一句中文回复：EasyAi DeepSeek V4 Pro 已连接。")
+    Write-LogStep "调用 claude --print"
+    $code = Invoke-External "claude" @("--print", "Reply in one short English sentence: EasyAi DeepSeek V4 Pro is connected.")
     Set-Progress 100
 
     if ($code -eq 0) {
         Write-Log "连接测试成功。"
+        Set-ResultSummary -Result "连接测试成功" -NextAction "可以直接开始使用 claude。"
         Show-Info "连接测试成功。`n`nDeepSeek API Key 有效，Claude Code 也可以正常调用 DeepSeek V4 Pro。"
         Set-Busy $false
         return $true
     }
 
     Write-Log ("连接测试失败，退出码：" + $code)
+    Set-ResultSummary -Result "连接测试失败" -NextAction "优先检查 Claude 登录、网络和本地终端。"
     Show-Warn "DeepSeek API Key 有效，但 Claude Code 测试没有通过。`n`n请优先检查：`n1. Claude Code 是否要求先登录或认证；`n2. 是否刚写入环境变量但还没有新开终端；`n3. 当前网络是否能访问 Claude Code。"
     Set-Busy $false
     return $false
@@ -551,19 +887,19 @@ function Refresh-EnvironmentView {
     Set-Status "正在检测..."
     Set-Progress 15
 
+    Write-LogStep "检测 Claude Code"
     $claudeStatus = Get-ToolVersion "claude"
     Write-Log ("Claude Code: " + $claudeStatus)
     $script:ClaudeStatus.Text = if ($claudeStatus -eq $MissingText) { "未安装" } else { "已安装" }
-    $script:DeepSeekStatus.Text = if ([Environment]::GetEnvironmentVariable("ANTHROPIC_BASE_URL", "User") -eq $DeepSeekBaseUrl) {
-        Write-Log "DeepSeek 配置: 已配置"
-        "已配置 DeepSeek V4 Pro"
-    } else {
-        Write-Log "DeepSeek 配置: 未配置"
-        "未配置"
-    }
+    Write-LogStep "检测模型配置"
+    $deepSeekState = Get-DeepSeekConfigState
+    Write-Log ("DeepSeek 配置: " + $deepSeekState.StatusText)
+    $script:DeepSeekStatus.Text = $deepSeekState.StatusText
+    Write-LogStep "检测官方下载"
     $downloadAccess = Test-ClaudeInstallerAccess
     $script:DownloadStatus.Text = Get-DownloadStatusShort $downloadAccess
     Write-Log ("Claude 官方下载: " + $downloadAccess)
+    Set-ResultSummary -Result ("检测完成：" + $downloadAccess) -NextAction "填写 Key 后可继续安装或配置。"
     Show-DownloadAccessPopupIfNeeded $downloadAccess
 
     Set-Progress 100
@@ -583,9 +919,9 @@ function Require-ApiKey {
 $xaml = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="EasyAi - DeepSeek V4 Pro"
-        Width="1040" Height="760"
-        MinWidth="960" MinHeight="700"
+        Title="EasyAi"
+        Width="1180" Height="860"
+        MinWidth="1080" MinHeight="780"
         WindowStartupLocation="CenterScreen"
         Background="#F6F8FB"
         FontFamily="Microsoft YaHei UI">
@@ -594,15 +930,16 @@ $xaml = @"
         <SolidColorBrush x:Key="TextMuted" Color="#64748B"/>
         <SolidColorBrush x:Key="Brand" Color="#2563EB"/>
         <SolidColorBrush x:Key="BrandDark" Color="#1D4ED8"/>
+        <SolidColorBrush x:Key="PanelTint" Color="#EFF6FF"/>
         <Style x:Key="Card" TargetType="Border">
             <Setter Property="Background" Value="White"/>
-            <Setter Property="CornerRadius" Value="12"/>
-            <Setter Property="Padding" Value="18"/>
-            <Setter Property="BorderBrush" Value="#E5E7EB"/>
+            <Setter Property="CornerRadius" Value="16"/>
+            <Setter Property="Padding" Value="22"/>
+            <Setter Property="BorderBrush" Value="#E2E8F0"/>
             <Setter Property="BorderThickness" Value="1"/>
         </Style>
         <Style x:Key="PrimaryButton" TargetType="Button">
-            <Setter Property="Height" Value="42"/>
+            <Setter Property="Height" Value="44"/>
             <Setter Property="Padding" Value="18,0"/>
             <Setter Property="Foreground" Value="White"/>
             <Setter Property="Background" Value="{StaticResource Brand}"/>
@@ -637,93 +974,207 @@ $xaml = @"
                 </Trigger>
             </Style.Triggers>
         </Style>
+        <Style x:Key="SuccessButton" TargetType="Button" BasedOn="{StaticResource PrimaryButton}">
+            <Setter Property="Background" Value="#16A34A"/>
+            <Setter Property="BorderBrush" Value="#16A34A"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#15803D"/>
+                    <Setter Property="BorderBrush" Value="#15803D"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
         <Style TargetType="TextBox">
-            <Setter Property="Height" Value="34"/>
-            <Setter Property="Padding" Value="10,6"/>
+            <Setter Property="Height" Value="40"/>
+            <Setter Property="Padding" Value="12,7"/>
             <Setter Property="BorderBrush" Value="#CBD5E1"/>
             <Setter Property="BorderThickness" Value="1"/>
         </Style>
         <Style TargetType="PasswordBox">
-            <Setter Property="Height" Value="34"/>
-            <Setter Property="Padding" Value="10,6"/>
+            <Setter Property="Height" Value="40"/>
+            <Setter Property="Padding" Value="12,7"/>
             <Setter Property="BorderBrush" Value="#CBD5E1"/>
             <Setter Property="BorderThickness" Value="1"/>
         </Style>
         <Style TargetType="ComboBox">
-            <Setter Property="Height" Value="34"/>
-            <Setter Property="Padding" Value="8,4"/>
+            <Setter Property="Height" Value="40"/>
+            <Setter Property="Padding" Value="10,5"/>
         </Style>
     </Window.Resources>
 
     <Grid Margin="22">
         <Grid.RowDefinitions>
-            <RowDefinition Height="56"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="18"/>
             <RowDefinition Height="*"/>
-            <RowDefinition Height="36"/>
         </Grid.RowDefinitions>
 
         <Grid Grid.Row="0">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="260"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="12"/>
+                <ColumnDefinition Width="130"/>
             </Grid.ColumnDefinitions>
             <StackPanel>
-                <TextBlock Text="EasyAi DeepSeek V4 Pro" FontSize="24" FontWeight="Bold" Foreground="{StaticResource TextMain}"/>
+                <TextBlock Text="EasyAi" FontSize="34" FontWeight="Bold" Foreground="{StaticResource TextMain}"/>
+                <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                    <TextBlock Text="作者 3ffgx  |  QQ 1405936435" Foreground="{StaticResource TextMuted}" VerticalAlignment="Center"/>
+                    <Button x:Name="BtnRepoHeader" Content="GitHub 仓库" Style="{StaticResource SecondaryButton}" Height="30" Padding="10,0" Margin="12,0,0,0"/>
+                </StackPanel>
             </StackPanel>
-            <Border Grid.Column="1" Background="#EEF2FF" CornerRadius="18" Padding="14,8" HorizontalAlignment="Right" VerticalAlignment="Top">
+            <Border Grid.Column="1" Background="#EEF2FF" CornerRadius="20" Padding="18,10" HorizontalAlignment="Right" VerticalAlignment="Center">
                 <TextBlock x:Name="StatusText" Text="就绪" Foreground="#1D4ED8" FontWeight="SemiBold"/>
             </Border>
+            <Button x:Name="BtnRefresh" Grid.Column="3" Content="重新检测" Style="{StaticResource SuccessButton}" Height="40"/>
         </Grid>
 
-        <Grid Grid.Row="1">
+        <Grid Grid.Row="2">
             <Grid.RowDefinitions>
-                <RowDefinition Height="250"/>
-                <RowDefinition Height="14"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="18"/>
                 <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
-            <Grid Grid.Row="0">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="360"/>
-                    <ColumnDefinition Width="18"/>
-                    <ColumnDefinition Width="*"/>
-                </Grid.ColumnDefinitions>
+            <Border Grid.Row="0" Style="{StaticResource Card}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="16"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="18"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="124"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
 
-                <StackPanel Grid.Column="0">
-                    <Border Style="{StaticResource Card}">
-                        <StackPanel>
-                            <TextBlock Text="模块 1｜安装前检测" FontSize="17" FontWeight="Bold" Foreground="{StaticResource TextMain}" Margin="0,0,0,12"/>
-
-                            <Grid Margin="0,0,0,10">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="116"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Text="Claude Code" Foreground="{StaticResource TextMuted}"/>
-                                <TextBlock x:Name="ClaudeStatus" Grid.Column="1" Text="检测中" FontWeight="SemiBold" TextWrapping="Wrap"/>
-                            </Grid>
-                            <Grid Margin="0,0,0,10">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="116"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Text="DeepSeek" Foreground="{StaticResource TextMuted}"/>
-                                <TextBlock x:Name="DeepSeekStatus" Grid.Column="1" Text="检测中" FontWeight="SemiBold" TextWrapping="Wrap"/>
-                            </Grid>
-                            <Grid Margin="0,0,0,10">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="116"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Text="官方下载" Foreground="{StaticResource TextMuted}"/>
-                                <TextBlock x:Name="DownloadStatus" Grid.Column="1" Text="检测中" FontWeight="SemiBold" TextWrapping="Wrap"/>
-                            </Grid>
+                    <Grid Grid.Row="0" Grid.ColumnSpan="2">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="16"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="16"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="国产模型配置" FontSize="18" FontWeight="Bold" Foreground="{StaticResource TextMain}"/>
                         </StackPanel>
+
+                        <Border Grid.Column="1" Background="{StaticResource PanelTint}" CornerRadius="999" Padding="14,8">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Claude Code " Foreground="{StaticResource TextMuted}"/>
+                                <TextBlock x:Name="ClaudeStatus" Text="检测中" FontWeight="SemiBold"/>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Grid.Column="3" Background="{StaticResource PanelTint}" CornerRadius="999" Padding="14,8">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="模型配置 " Foreground="{StaticResource TextMuted}"/>
+                                <TextBlock x:Name="DeepSeekStatus" Text="检测中" FontWeight="SemiBold"/>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Grid.Column="5" Background="{StaticResource PanelTint}" CornerRadius="999" Padding="14,8">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="官方下载 " Foreground="{StaticResource TextMuted}"/>
+                                <TextBlock x:Name="DownloadStatus" Text="检测中" FontWeight="SemiBold"/>
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+
+                    <TextBlock Grid.Row="2" Text="Base URL" Foreground="{StaticResource TextMuted}" VerticalAlignment="Center"/>
+                    <TextBox Grid.Row="2" Grid.Column="1" Text="https://api.deepseek.com/anthropic" IsReadOnly="True"/>
+
+                    <Grid Grid.Row="4" Grid.ColumnSpan="2">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="124"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="14"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="14"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="18"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="14"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0" Text="API Key" Foreground="{StaticResource TextMuted}" VerticalAlignment="Center"/>
+                        <PasswordBox x:Name="ApiKeyBox" Grid.Row="0" Grid.Column="1"/>
+
+                        <TextBlock Grid.Row="2" Text="模型" Foreground="{StaticResource TextMuted}" VerticalAlignment="Center"/>
+                        <ComboBox x:Name="ModelBox" Grid.Row="2" Grid.Column="1" IsEditable="True" Text="deepseek-v4-pro">
+                            <ComboBoxItem Content="deepseek-v4-pro"/>
+                            <ComboBoxItem Content="deepseek-chat"/>
+                            <ComboBoxItem Content="deepseek-reasoner"/>
+                        </ComboBox>
+
+                        <TextBlock Grid.Row="4" Text="兼容模式" Foreground="{StaticResource TextMuted}" VerticalAlignment="Center"/>
+                        <CheckBox x:Name="CompatCheck" Grid.Row="4" Grid.Column="1" Content="同时写入 ANTHROPIC_API_KEY 和 DEEPSEEK_API_KEY" IsChecked="True" VerticalAlignment="Center"/>
+
+                        <Grid Grid.Row="6" Grid.ColumnSpan="2">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="12"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="12"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Button x:Name="BtnInstallOnly" Grid.Column="0" Content="只安装 Claude Code" Style="{StaticResource SecondaryButton}"/>
+                            <Button x:Name="BtnConfigOnly" Grid.Column="2" Content="只配置模型" Style="{StaticResource SecondaryButton}"/>
+                            <Button x:Name="BtnFull" Grid.Column="4" Content="一键安装并配置" Style="{StaticResource PrimaryButton}"/>
+                        </Grid>
+
+                        <Grid Grid.Row="8" Grid.ColumnSpan="2">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="12"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="12"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="12"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Button x:Name="BtnSaveKey" Grid.Column="0" Content="仅保存配置" Style="{StaticResource SecondaryButton}"/>
+                            <Button x:Name="BtnTest" Grid.Column="2" Content="测试连接" Style="{StaticResource SecondaryButton}"/>
+                            <Button x:Name="BtnOpenKey" Grid.Column="4" Content="打开 Key 页面" Style="{StaticResource SecondaryButton}"/>
+                            <Button x:Name="BtnLogs" Grid.Column="6" Content="打开日志目录" Style="{StaticResource SecondaryButton}"/>
+                        </Grid>
+                    </Grid>
+                </Grid>
+            </Border>
+
+            <Border Grid.Row="2" Style="{StaticResource Card}" Padding="18">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="3*"/>
+                        <ColumnDefinition Width="16"/>
+                        <ColumnDefinition Width="2*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <Border Grid.Column="0" Background="#000000" CornerRadius="10" Padding="16">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="12"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+                            <TextBlock Text="运行日志" FontSize="18" FontWeight="Bold" Foreground="White"/>
+                            <RichTextBox x:Name="LogBox" Grid.Row="2" Background="#000000" Foreground="#E5E7EB"
+                                         FontFamily="Consolas" FontSize="12" BorderThickness="0" Padding="0"
+                                         IsReadOnly="True" IsDocumentEnabled="False"
+                                         VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
+                                <FlowDocument PagePadding="0" TextAlignment="Left"/>
+                            </RichTextBox>
+                        </Grid>
                     </Border>
 
-                </StackPanel>
-
-                <StackPanel Grid.Column="2">
-                    <Border Style="{StaticResource Card}">
+                    <Border Grid.Column="2" Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="10" Padding="16">
                         <Grid>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
@@ -733,111 +1184,122 @@ $xaml = @"
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="12"/>
                                 <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="16"/>
+                                <RowDefinition Height="12"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="12"/>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="12"/>
                                 <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="120"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="结果面板" FontSize="18" FontWeight="Bold" Foreground="{StaticResource TextMain}"/>
 
-                            <TextBlock Text="模块 2｜DeepSeek 配置" Grid.ColumnSpan="2" FontSize="17" FontWeight="Bold" Foreground="{StaticResource TextMain}"/>
+                            <Border Grid.Row="2" Background="White" CornerRadius="8" Padding="12" BorderBrush="#E2E8F0" BorderThickness="1">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="78"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="当前阶段" Foreground="{StaticResource TextMuted}"/>
+                                    <TextBlock x:Name="SummaryStageValue" Grid.Column="1" Text="就绪" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                </Grid>
+                            </Border>
 
-                            <TextBlock Grid.Row="2" Text="Base URL" Foreground="{StaticResource TextMuted}" VerticalAlignment="Center"/>
-                            <TextBox Grid.Row="2" Grid.Column="1" Text="https://api.deepseek.com/anthropic" IsReadOnly="True"/>
+                            <Border Grid.Row="4" Background="White" CornerRadius="8" Padding="12" BorderBrush="#E2E8F0" BorderThickness="1">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="78"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="最近结果" Foreground="{StaticResource TextMuted}"/>
+                                    <TextBlock x:Name="SummaryResultValue" Grid.Column="1" Text="等待操作" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                </Grid>
+                            </Border>
 
-                            <TextBlock Grid.Row="4" Text="API Key" Foreground="{StaticResource TextMuted}" VerticalAlignment="Center"/>
-                            <PasswordBox x:Name="ApiKeyBox" Grid.Row="4" Grid.Column="1"/>
+                            <Border Grid.Row="6" Background="White" CornerRadius="8" Padding="12" BorderBrush="#E2E8F0" BorderThickness="1">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="78"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="配置文件" Foreground="{StaticResource TextMuted}"/>
+                                    <TextBlock x:Name="SummaryPathValue" Grid.Column="1" Text="~/.claude/settings.json" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                </Grid>
+                            </Border>
 
-                            <TextBlock Grid.Row="6" Text="模型" Foreground="{StaticResource TextMuted}" VerticalAlignment="Center"/>
-                            <ComboBox x:Name="ModelBox" Grid.Row="6" Grid.Column="1" IsEditable="True" Text="deepseek-v4-pro">
-                                <ComboBoxItem Content="deepseek-v4-pro"/>
-                                <ComboBoxItem Content="deepseek-chat"/>
-                                <ComboBoxItem Content="deepseek-reasoner"/>
-                            </ComboBox>
+                            <Border Grid.Row="8" Background="White" CornerRadius="8" Padding="12" BorderBrush="#E2E8F0" BorderThickness="1">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="78"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="备份文件" Foreground="{StaticResource TextMuted}"/>
+                                    <TextBlock x:Name="SummaryBackupValue" Grid.Column="1" Text="尚未生成" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                </Grid>
+                            </Border>
 
-                            <StackPanel Grid.Row="8" Grid.Column="1" Orientation="Horizontal">
-                                <CheckBox x:Name="CompatCheck" Content="同时写入 ANTHROPIC_API_KEY 和 DEEPSEEK_API_KEY" IsChecked="True" VerticalAlignment="Center"/>
-                            </StackPanel>
+                            <Border Grid.Row="10" Background="#EEF2FF" CornerRadius="8" Padding="12">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="78"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="下一步" Foreground="{StaticResource TextMuted}"/>
+                                    <TextBlock x:Name="SummaryNextValue" Grid.Column="1" Text="填写 Key 后开始操作。" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                </Grid>
+                            </Border>
 
-                            <StackPanel Grid.Row="10" Grid.Column="1" Orientation="Horizontal" Margin="0,8,0,0">
-                                <Button x:Name="BtnSaveKey" Content="保存 API Key" Style="{StaticResource SecondaryButton}" Height="34" Padding="12,0"/>
-                            </StackPanel>
+                            <Border Grid.Row="12" Background="White" CornerRadius="8" Padding="12" BorderBrush="#E2E8F0" BorderThickness="1">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="8"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="8"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Text="作者：3ffgx" Foreground="{StaticResource TextMain}" FontWeight="SemiBold"/>
+                                    <StackPanel Grid.Row="2">
+                                        <TextBlock Text="仓库：" Foreground="{StaticResource TextMuted}"/>
+                                        <Button x:Name="BtnRepo" Content="3ffgx/EasyAi.git" Style="{StaticResource SecondaryButton}" Height="34" Margin="0,6,0,0"/>
+                                    </StackPanel>
+                                    <TextBlock Grid.Row="4" Text="问题反馈 QQ：1405936435" Foreground="{StaticResource TextMuted}" TextWrapping="Wrap"/>
+                                </Grid>
+                            </Border>
                         </Grid>
                     </Border>
-
-                    <Border Style="{StaticResource Card}" Margin="0,14,0,0">
-                        <StackPanel>
-                            <TextBlock Text="模块 3｜执行操作" FontSize="17" FontWeight="Bold" Foreground="{StaticResource TextMain}" Margin="0,0,0,12"/>
-                            <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="12"/>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="12"/>
-                            <ColumnDefinition Width="*"/>
-                        </Grid.ColumnDefinitions>
-                        <Button x:Name="BtnInstallOnly" Grid.Column="0" Content="安装 Claude Code" Style="{StaticResource SecondaryButton}"/>
-                        <Button x:Name="BtnConfigOnly" Grid.Column="2" Content="配置 DeepSeek" Style="{StaticResource SecondaryButton}"/>
-                        <Button x:Name="BtnFull" Grid.Column="4" Content="安装并配置" Style="{StaticResource PrimaryButton}"/>
-                            </Grid>
-                            <Grid Margin="0,12,0,0">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="12"/>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="12"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <Button x:Name="BtnOpenKey" Grid.Column="0" Content="DeepSeek Key" Style="{StaticResource SecondaryButton}"/>
-                                <Button x:Name="BtnTest" Grid.Column="2" Content="测试连接" Style="{StaticResource SecondaryButton}"/>
-                                <Button x:Name="BtnLogs" Grid.Column="4" Content="日志目录" Style="{StaticResource SecondaryButton}"/>
-                            </Grid>
-                        </StackPanel>
-                    </Border>
-                </StackPanel>
-            </Grid>
-
-            <Border Grid.Row="2" Style="{StaticResource Card}" Padding="16">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="10"/>
-                        <RowDefinition Height="*"/>
-                    </Grid.RowDefinitions>
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <TextBlock Text="模块 4｜运行日志" FontSize="17" FontWeight="Bold" Foreground="{StaticResource TextMain}"/>
-                    </Grid>
-                    <TextBox x:Name="LogBox" Grid.Row="2" Background="#0F172A" Foreground="#E5E7EB"
-                             FontFamily="Consolas" FontSize="12" BorderThickness="0" Padding="12"
-                             MinHeight="260"
-                             IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap"
-                             VerticalScrollBarVisibility="Auto"/>
                 </Grid>
             </Border>
         </Grid>
+    </Grid>
+</Window>
+"@
 
-        <Grid Grid.Row="2" Margin="0,14,0,0">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="12"/>
-                <ColumnDefinition Width="92"/>
-            </Grid.ColumnDefinitions>
-            <ProgressBar x:Name="ProgressBar" Height="10" VerticalAlignment="Center" Minimum="0" Maximum="100"/>
-            <Button x:Name="BtnRefresh" Grid.Column="2" Content="重新检测" Style="{StaticResource SecondaryButton}" Height="32"/>
-        </Grid>
+$progressXaml = @"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="EasyAi"
+        Width="420" Height="150"
+        ResizeMode="NoResize"
+        WindowStyle="ToolWindow"
+        ShowInTaskbar="False"
+        Background="White"
+        FontFamily="Microsoft YaHei UI">
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="14"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <TextBlock x:Name="ProgressStatusText" Text="正在处理..." FontSize="16" FontWeight="SemiBold" Foreground="#111827"/>
+        <ProgressBar x:Name="ProgressPopupBar" Grid.Row="2" Height="14" Minimum="0" Maximum="100"/>
     </Grid>
 </Window>
 "@
 
 $reader = New-Object System.Xml.XmlNodeReader ([xml]$xaml)
 $script:Window = [Windows.Markup.XamlReader]::Load($reader)
+$progressReader = New-Object System.Xml.XmlNodeReader ([xml]$progressXaml)
+$script:ProgressWindow = [Windows.Markup.XamlReader]::Load($progressReader)
 
 $script:StatusText = $script:Window.FindName("StatusText")
 $script:ClaudeStatus = $script:Window.FindName("ClaudeStatus")
@@ -847,7 +1309,11 @@ $script:ApiKeyBox = $script:Window.FindName("ApiKeyBox")
 $script:ModelBox = $script:Window.FindName("ModelBox")
 $script:CompatCheck = $script:Window.FindName("CompatCheck")
 $script:LogBox = $script:Window.FindName("LogBox")
-$script:ProgressBar = $script:Window.FindName("ProgressBar")
+$script:SummaryStageValue = $script:Window.FindName("SummaryStageValue")
+$script:SummaryResultValue = $script:Window.FindName("SummaryResultValue")
+$script:SummaryPathValue = $script:Window.FindName("SummaryPathValue")
+$script:SummaryBackupValue = $script:Window.FindName("SummaryBackupValue")
+$script:SummaryNextValue = $script:Window.FindName("SummaryNextValue")
 $script:BtnInstallOnly = $script:Window.FindName("BtnInstallOnly")
 $script:BtnFull = $script:Window.FindName("BtnFull")
 $script:BtnConfigOnly = $script:Window.FindName("BtnConfigOnly")
@@ -856,8 +1322,13 @@ $script:BtnTest = $script:Window.FindName("BtnTest")
 $script:BtnLogs = $script:Window.FindName("BtnLogs")
 $script:BtnRefresh = $script:Window.FindName("BtnRefresh")
 $script:BtnSaveKey = $script:Window.FindName("BtnSaveKey")
+$script:BtnRepo = $script:Window.FindName("BtnRepo")
+$script:BtnRepoHeader = $script:Window.FindName("BtnRepoHeader")
+$script:ProgressStatusText = $script:ProgressWindow.FindName("ProgressStatusText")
+$script:ProgressPopupBar = $script:ProgressWindow.FindName("ProgressPopupBar")
 
 $script:BtnInstallOnly.Add_Click({
+    Write-LogSection "用户操作：只安装 Claude Code"
     Set-Progress 0
     if (Install-ClaudeCodeNative) {
         Refresh-EnvironmentView
@@ -868,6 +1339,7 @@ $script:BtnInstallOnly.Add_Click({
 })
 
 $script:BtnFull.Add_Click({
+    Write-LogSection "用户操作：一键安装并配置"
     $key = Require-ApiKey
     if (-not $key) { return }
     Set-Progress 0
@@ -884,6 +1356,7 @@ $script:BtnFull.Add_Click({
 })
 
 $script:BtnConfigOnly.Add_Click({
+    Write-LogSection "用户操作：只配置模型"
     $key = Require-ApiKey
     if (-not $key) { return }
     Set-Progress 0
@@ -896,6 +1369,7 @@ $script:BtnConfigOnly.Add_Click({
 })
 
 $script:BtnSaveKey.Add_Click({
+    Write-LogSection "用户操作：仅保存配置"
     $key = Require-ApiKey
     if (-not $key) { return }
     Set-Progress 0
@@ -911,7 +1385,16 @@ $script:BtnOpenKey.Add_Click({
     Start-Process $DeepSeekApiKeyUrl
 })
 
+$script:BtnRepo.Add_Click({
+    Start-Process "https://github.com/3ffgx/EasyAi.git"
+})
+
+$script:BtnRepoHeader.Add_Click({
+    Start-Process "https://github.com/3ffgx/EasyAi.git"
+})
+
 $script:BtnTest.Add_Click({
+    Write-LogSection "用户操作：测试连接"
     $key = Require-ApiKey
     if (-not $key) { return }
     Set-Progress 0
@@ -924,6 +1407,7 @@ $script:BtnLogs.Add_Click({
 })
 
 $script:BtnRefresh.Add_Click({
+    Write-LogSection "用户操作：重新检测"
     Refresh-EnvironmentView
 })
 
