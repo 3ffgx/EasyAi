@@ -735,6 +735,8 @@ $xaml = @"
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="16"/>
                                 <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="12"/>
+                                <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="120"/>
@@ -758,6 +760,10 @@ $xaml = @"
 
                             <StackPanel Grid.Row="8" Grid.Column="1" Orientation="Horizontal">
                                 <CheckBox x:Name="CompatCheck" Content="同时写入 ANTHROPIC_API_KEY 和 DEEPSEEK_API_KEY" IsChecked="True" VerticalAlignment="Center"/>
+                            </StackPanel>
+
+                            <StackPanel Grid.Row="10" Grid.Column="1" Orientation="Horizontal" Margin="0,8,0,0">
+                                <Button x:Name="BtnSaveKey" Content="保存 API Key" Style="{StaticResource SecondaryButton}" Height="34" Padding="12,0"/>
                             </StackPanel>
                         </Grid>
                     </Border>
@@ -849,6 +855,7 @@ $script:BtnOpenKey = $script:Window.FindName("BtnOpenKey")
 $script:BtnTest = $script:Window.FindName("BtnTest")
 $script:BtnLogs = $script:Window.FindName("BtnLogs")
 $script:BtnRefresh = $script:Window.FindName("BtnRefresh")
+$script:BtnSaveKey = $script:Window.FindName("BtnSaveKey")
 
 $script:BtnInstallOnly.Add_Click({
     Set-Progress 0
@@ -886,6 +893,18 @@ $script:BtnConfigOnly.Add_Click({
     Save-DeepSeekConfig $key $script:ModelBox.Text | Out-Null
     Refresh-EnvironmentView
     Show-Info "DeepSeek API Key 校验通过，DeepSeek V4 Pro 已配置。`n`n请新打开终端后使用 claude。"
+})
+
+$script:BtnSaveKey.Add_Click({
+    $key = Require-ApiKey
+    if (-not $key) { return }
+    Set-Progress 0
+    if (-not (Confirm-DeepSeekApiKey $key $script:ModelBox.Text $true)) {
+        return
+    }
+    Save-DeepSeekConfig $key $script:ModelBox.Text | Out-Null
+    Refresh-EnvironmentView
+    Show-Info "API Key 已保存，DeepSeek V4 Pro 已配置。`n`n请新打开终端后使用 claude。"
 })
 
 $script:BtnOpenKey.Add_Click({
