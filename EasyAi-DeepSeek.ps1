@@ -1,4 +1,4 @@
-$ErrorActionPreference = "Continue"
+﻿$ErrorActionPreference = "Continue"
 
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
@@ -18,12 +18,12 @@ function Mask-Secret {
     param([string]$Value)
 
     if (-not $Value) {
-        return "****"
+        return '****'
     }
     if ($Value.Length -le 10) {
-        return "****"
+        return '****'
     }
-    return $Value.Substring(0, 4) + "****" + $Value.Substring($Value.Length - 4)
+    return $Value.Substring(0, 4) + '****' + $Value.Substring($Value.Length - 4)
 }
 
 function Ensure-ConfigDir {
@@ -42,7 +42,8 @@ function Write-Log {
     param([string]$Message)
 
     Ensure-ConfigDir
-    $line = "[{0}] {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $Message
+    $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+    $line = "[$timestamp] $Message"
     Add-Content -LiteralPath $LogPath -Value $line -Encoding UTF8
 
     if ($script:LogBox) {
