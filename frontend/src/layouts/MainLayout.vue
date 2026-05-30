@@ -1,14 +1,12 @@
 <template>
-  <el-container class="main-layout">
+  <div class="main-layout">
     <!-- 侧边栏 -->
-    <el-aside :width="isCollapse ? '64px' : '240px'" class="aside">
+    <div class="aside" :style="{ width: isCollapse ? '64px' : '240px' }">
       <div class="logo" @click="router.push('/')">
         <div class="logo-icon">
           <el-icon :size="24"><ChatDotRound /></el-icon>
         </div>
-        <transition name="fade">
-          <span v-show="!isCollapse" class="logo-text">EasyAi</span>
-        </transition>
+        <span v-show="!isCollapse" class="logo-text">EasyAi</span>
       </div>
 
       <el-menu
@@ -34,9 +32,7 @@
           <div class="menu-divider"></div>
           <el-menu-item-group>
             <template #title>
-              <transition name="fade">
-                <span v-show="!isCollapse" class="group-title">管理后台</span>
-              </transition>
+              <span v-show="!isCollapse" class="group-title">管理后台</span>
             </template>
             <el-menu-item index="/admin">
               <el-icon><Histogram /></el-icon>
@@ -68,23 +64,28 @@
           <Expand v-else />
         </el-icon>
       </div>
-    </el-aside>
+    </div>
 
     <!-- 主内容区 -->
-    <el-container>
-      <el-header class="header">
+    <div class="content-wrapper">
+      <div class="header">
         <div class="header-left">
           <h2 class="page-title">{{ currentTitle }}</h2>
         </div>
         <div class="header-right">
+          <button class="theme-toggle" @click="themeStore.toggleTheme()" :title="themeStore.isDark ? '切换到亮色模式' : '切换到暗色模式'">
+            <el-icon :size="18">
+              <Sunny v-if="themeStore.isDark" />
+              <Moon v-else />
+            </el-icon>
+          </button>
+
           <el-dropdown @command="handleCommand" trigger="click">
             <div class="user-info">
               <el-avatar :size="36" class="user-avatar">
                 <el-icon :size="20"><UserFilled /></el-icon>
               </el-avatar>
-              <transition name="fade">
-                <span class="username">{{ authStore.user?.nickname }}</span>
-              </transition>
+              <span class="username">{{ authStore.user?.nickname }}</span>
               <el-icon class="arrow-icon"><ArrowDown /></el-icon>
             </div>
             <template #dropdown>
@@ -101,33 +102,25 @@
             </template>
           </el-dropdown>
         </div>
-      </el-header>
+      </div>
 
-      <el-main class="main">
-        <router-view v-slot="{ Component, route }">
-          <transition name="fade-slide" mode="out-in">
-            <div :key="route.path" class="page-container">
-              <component :is="Component" />
-            </div>
-          </transition>
-        </router-view>
-      </el-main>
-    </el-container>
-  </el-container>
-
-  <!-- 公告弹窗 -->
-  <AnnouncementDialog />
+      <div class="main-content">
+        <router-view />
+      </div>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import AnnouncementDialog from '@/components/AnnouncementDialog.vue'
+import { useThemeStore } from '@/stores/theme'
 
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
+const themeStore = useThemeStore()
 
 const isCollapse = ref(false)
 
@@ -158,17 +151,19 @@ function handleCommand(command: string) {
 <style scoped>
 .main-layout {
   height: 100vh;
+  display: flex;
   overflow: hidden;
 }
 
 .aside {
-  background: linear-gradient(180deg, #1a1f36 0%, #252b48 100%);
-  transition: width var(--transition-normal);
+  background: var(--el-bg-color-overlay);
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   display: flex;
   flex-direction: column;
-  overflow: hidden;
-  box-shadow: 4px 0 12px rgba(0, 0, 0, 0.1);
+  border-right: 1px solid var(--el-border-color);
   z-index: 10;
+  flex-shrink: 0;
+  overflow: hidden;
 }
 
 .logo {
@@ -179,18 +174,17 @@ function handleCommand(command: string) {
   cursor: pointer;
   gap: 10px;
   padding: 0 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  transition: all var(--transition-normal);
+  border-bottom: 1px solid var(--el-border-color);
 }
 
 .logo:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--el-fill-color-light);
 }
 
 .logo-icon {
   width: 36px;
   height: 36px;
-  background: linear-gradient(135deg, #409eff 0%, #6366f1 100%);
+  background: var(--el-color-primary);
   border-radius: 10px;
   display: flex;
   align-items: center;
@@ -202,11 +196,8 @@ function handleCommand(command: string) {
 .logo-text {
   font-size: 18px;
   font-weight: 700;
-  color: white;
+  color: var(--el-text-color-primary);
   white-space: nowrap;
-  background: linear-gradient(135deg, #fff 0%, #a5b4fc 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
 }
 
 .side-menu {
@@ -221,22 +212,20 @@ function handleCommand(command: string) {
 }
 
 :deep(.el-menu-item) {
-  color: rgba(255, 255, 255, 0.65);
+  color: var(--el-text-color-regular);
   border-radius: 8px;
   margin: 2px 0;
   height: 44px;
-  transition: all var(--transition-fast);
 }
 
-:deep(.el-menu-item:hover),
-:deep(.el-menu-item.is-active) {
-  color: white;
-  background: linear-gradient(135deg, rgba(64, 158, 255, 0.3) 0%, rgba(99, 102, 241, 0.3) 100%);
+:deep(.el-menu-item:hover) {
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-primary);
 }
 
 :deep(.el-menu-item.is-active) {
-  background: linear-gradient(135deg, rgba(64, 158, 255, 0.5) 0%, rgba(99, 102, 241, 0.5) 100%);
-  box-shadow: 0 2px 8px rgba(64, 158, 255, 0.3);
+  background: var(--el-color-primary-light-9);
+  color: var(--el-color-primary);
 }
 
 :deep(.el-menu-item-group__title) {
@@ -245,13 +234,13 @@ function handleCommand(command: string) {
 
 .menu-divider {
   height: 1px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--el-border-color);
   margin: 12px 16px;
 }
 
 .group-title {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--el-text-color-secondary);
   text-transform: uppercase;
   letter-spacing: 1px;
   padding: 0 16px;
@@ -263,33 +252,68 @@ function handleCommand(command: string) {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  color: rgba(255, 255, 255, 0.45);
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  transition: all var(--transition-fast);
+  color: var(--el-text-color-secondary);
+  border-top: 1px solid var(--el-border-color);
 }
 
 .collapse-btn:hover {
-  color: white;
-  background: rgba(255, 255, 255, 0.05);
+  color: var(--el-text-color-primary);
+  background: var(--el-fill-color-light);
+}
+
+.content-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .header {
-  background: rgba(255, 255, 255, 0.95);
-  backdrop-filter: blur(10px);
-  border-bottom: 1px solid var(--border-light);
+  background: var(--el-bg-color-overlay);
+  border-bottom: 1px solid var(--el-border-color);
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 24px;
   height: 64px;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+  flex-shrink: 0;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .page-title {
   margin: 0;
   font-size: 18px;
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--el-text-color-primary);
+}
+
+.theme-toggle {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 1px solid var(--el-border-color);
+  border-radius: 8px;
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+}
+
+.theme-toggle:hover {
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-primary);
 }
 
 .user-info {
@@ -298,67 +322,32 @@ function handleCommand(command: string) {
   gap: 10px;
   cursor: pointer;
   padding: 6px 12px;
-  border-radius: var(--radius-md);
-  transition: all var(--transition-fast);
+  border-radius: 8px;
 }
 
 .user-info:hover {
-  background: var(--bg-color);
+  background: var(--el-fill-color-light);
 }
 
 .user-avatar {
-  background: linear-gradient(135deg, #409eff 0%, #6366f1 100%);
+  background: var(--el-color-primary);
 }
 
 .username {
   font-size: 14px;
   font-weight: 500;
-  color: var(--text-primary);
+  color: var(--el-text-color-primary);
 }
 
 .arrow-icon {
   font-size: 12px;
-  color: var(--text-secondary);
-  transition: transform var(--transition-fast);
+  color: var(--el-text-color-secondary);
 }
 
-.user-info:hover .arrow-icon {
-  transform: rotate(180deg);
-}
-
-.main {
-  background: var(--bg-color);
+.main-content {
+  flex: 1;
+  background: var(--el-bg-color);
   padding: 20px;
   overflow-y: auto;
-}
-
-.page-container {
-  animation: fadeIn 0.4s ease;
-}
-
-/* 页面内过渡动画 */
-.fade-slide-enter-active,
-.fade-slide-leave-active {
-  transition: all 0.3s ease;
-}
-
-.fade-slide-enter-from {
-  opacity: 0;
-  transform: translateY(10px);
-}
-
-.fade-slide-leave-to {
-  opacity: 0;
-  transform: translateY(-10px);
-}
-
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.3s ease;
-}
-
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
 }
 </style>

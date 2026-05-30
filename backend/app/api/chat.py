@@ -208,7 +208,8 @@ async def send_message(
         chat_service = ChatService(db)
         full_content = ""
         full_reasoning = ""
-        total_tokens = 0
+        tokens_input = 0
+        tokens_output = 0
 
         try:
             async for chunk in chat_service.stream_chat(messages, model_id):
@@ -217,7 +218,9 @@ async def send_message(
                     full_content += chunk.get("content", "")
                 elif chunk_type == "reasoning":
                     full_reasoning += chunk.get("content", "")
-                total_tokens += chunk.get("tokens", 0)
+                elif chunk_type == "done":
+                    tokens_input = chunk.get("tokens_input", 0)
+                    tokens_output = chunk.get("tokens_output", 0)
                 yield f"data: {json.dumps(chunk)}\n\n"
 
             # 流结束后使用独立会话保存消息
@@ -232,7 +235,7 @@ async def send_message(
                             conversation_id=req.conversation_id,
                             role="assistant",
                             content=final_content,
-                            tokens_used=total_tokens,
+                            tokens_used=tokens_input + tokens_output,
                         )
                         save_db.add(assistant_message)
 
@@ -243,12 +246,12 @@ async def send_message(
                             user_id=current_user.id,
                             conversation_id=req.conversation_id,
                             model_id=model_id,
-                            tokens_input=total_tokens // 2,
-                            tokens_output=total_tokens // 2,
+                            tokens_input=tokens_input,
+                            tokens_output=tokens_output,
                         )
 
                         await save_db.commit()
-                        print(f"Saved assistant message: {len(final_content)} chars")
+                        print(f"Saved assistant message: {len(final_content)} chars, tokens: {tokens_input}+{tokens_output}")
                 except Exception as save_error:
                     print(f"Error saving message: {save_error}")
 

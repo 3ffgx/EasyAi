@@ -3,7 +3,7 @@
     <!-- 统计卡片 -->
     <el-row :gutter="16" class="stats-row">
       <el-col :span="6">
-        <el-card shadow="hover" class="stat-card">
+        <el-card shadow="never" class="stat-card">
           <div class="stat-item">
             <div class="stat-label">总 Token 用量</div>
             <div class="stat-value">{{ formatNumber(stats.total?.tokens || 0) }}</div>
@@ -15,7 +15,7 @@
         </el-card>
       </el-col>
       <el-col :span="6">
-        <el-card shadow="hover" class="stat-card">
+        <el-card shadow="never" class="stat-card">
           <div class="stat-item">
             <div class="stat-label">今日 Token 用量</div>
             <div class="stat-value">{{ formatNumber(stats.today?.tokens || 0) }}</div>
@@ -27,7 +27,7 @@
         </el-card>
       </el-col>
       <el-col :span="6">
-        <el-card shadow="hover" class="stat-card">
+        <el-card shadow="never" class="stat-card">
           <div class="stat-item">
             <div class="stat-label">本月 Token 用量</div>
             <div class="stat-value">{{ formatNumber(stats.month?.tokens || 0) }}</div>
@@ -39,7 +39,7 @@
         </el-card>
       </el-col>
       <el-col :span="6">
-        <el-card shadow="hover" class="stat-card">
+        <el-card shadow="never" class="stat-card">
           <div class="stat-item">
             <div class="stat-label">账户余额</div>
             <div class="stat-value">¥{{ balance.toFixed(2) }}</div>
@@ -54,7 +54,7 @@
     <!-- 图表区域 -->
     <el-row :gutter="16" class="chart-row">
       <el-col :span="16">
-        <el-card>
+        <el-card shadow="never">
           <template #header>
             <div class="card-header">
               <span>每日 Token 用量趋势</span>
@@ -69,7 +69,7 @@
         </el-card>
       </el-col>
       <el-col :span="8">
-        <el-card>
+        <el-card shadow="never">
           <template #header>
             <span>模型使用分布</span>
           </template>
@@ -79,7 +79,7 @@
     </el-row>
 
     <!-- 使用记录表格 -->
-    <el-card>
+    <el-card shadow="never">
       <template #header>
         <div class="card-header">
           <span>使用记录</span>
@@ -131,11 +131,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick, watch } from 'vue'
-import { useUsageStore } from '@/stores/usage'
+import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import * as echarts from 'echarts'
-
-const usageStore = useUsageStore()
 
 const loading = ref(false)
 const records = ref([])
@@ -150,8 +147,29 @@ const dailyChartRef = ref<HTMLElement>()
 const modelChartRef = ref<HTMLElement>()
 let dailyChart: echarts.ECharts | null = null
 let modelChart: echarts.ECharts | null = null
+let refreshTimer: ReturnType<typeof setInterval> | null = null
 
 onMounted(async () => {
+  await fetchAllData()
+
+  nextTick(() => {
+    initCharts()
+  })
+
+  // 每 20 秒刷新数据
+  refreshTimer = setInterval(() => {
+    fetchAllData()
+  }, 20000)
+})
+
+onUnmounted(() => {
+  if (refreshTimer) {
+    clearInterval(refreshTimer)
+  }
+  window.removeEventListener('resize', handleResize)
+})
+
+async function fetchAllData() {
   await Promise.all([
     fetchStats(),
     fetchBalance(),
@@ -159,18 +177,13 @@ onMounted(async () => {
     fetchDailyUsage(),
     fetchModelStats(),
   ])
-
-  nextTick(() => {
-    initCharts()
-  })
-})
+}
 
 async function fetchStats() {
   try {
+    const token = localStorage.getItem('token')
     const response = await fetch('/api/usage/stats', {
-      headers: {
-        Authorization: `Bearer ${localStorage.getItem('token')}`,
-      },
+      headers: { Authorization: `Bearer ${token}` },
     })
     stats.value = await response.json()
   } catch (error) {
@@ -180,10 +193,9 @@ async function fetchStats() {
 
 async function fetchBalance() {
   try {
+    const token = localStorage.getItem('token')
     const response = await fetch('/api/usage/balance', {
-      headers: {
-        Authorization: `Bearer ${localStorage.getItem('token')}`,
-      },
+      headers: { Authorization: `Bearer ${token}` },
     })
     const data = await response.json()
     balance.value = data.balance || 0
@@ -195,10 +207,9 @@ async function fetchBalance() {
 async function fetchRecords() {
   loading.value = true
   try {
+    const token = localStorage.getItem('token')
     const response = await fetch(`/api/usage/records?page=${currentPage.value}&page_size=${pageSize.value}`, {
-      headers: {
-        Authorization: `Bearer ${localStorage.getItem('token')}`,
-      },
+      headers: { Authorization: `Bearer ${token}` },
     })
     const data = await response.json()
     records.value = data.items || []
@@ -210,10 +221,9 @@ async function fetchRecords() {
 
 async function fetchDailyUsage() {
   try {
+    const token = localStorage.getItem('token')
     const response = await fetch(`/api/usage/daily?days=${chartDays.value}`, {
-      headers: {
-        Authorization: `Bearer ${localStorage.getItem('token')}`,
-      },
+      headers: { Authorization: `Bearer ${token}` },
     })
     const data = await response.json()
     updateDailyChart(data)
@@ -224,10 +234,9 @@ async function fetchDailyUsage() {
 
 async function fetchModelStats() {
   try {
+    const token = localStorage.getItem('token')
     const response = await fetch('/api/usage/model-stats', {
-      headers: {
-        Authorization: `Bearer ${localStorage.getItem('token')}`,
-      },
+      headers: { Authorization: `Bearer ${token}` },
     })
     const data = await response.json()
     updateModelChart(data.models || [])
@@ -244,45 +253,20 @@ function initCharts() {
     modelChart = echarts.init(modelChartRef.value)
   }
 
-  // 监听窗口大小变化
-  window.addEventListener('resize', () => {
-    dailyChart?.resize()
-    modelChart?.resize()
-  })
+  window.addEventListener('resize', handleResize)
+}
 
-  // 使用 ResizeObserver 监听容器大小变化
-  const observer = new ResizeObserver(() => {
-    dailyChart?.resize()
-    modelChart?.resize()
-  })
-
-  if (dailyChartRef.value) {
-    observer.observe(dailyChartRef.value)
-  }
-  if (modelChartRef.value) {
-    observer.observe(modelChartRef.value)
-  }
+function handleResize() {
+  dailyChart?.resize()
+  modelChart?.resize()
 }
 
 function updateDailyChart(data: any) {
-  if (!dailyChart) return
+  if (!dailyChart || !data.dates) return
 
   dailyChart.setOption({
     tooltip: {
       trigger: 'axis',
-      axisPointer: {
-        type: 'shadow',
-      },
-      formatter: function (params: any) {
-        let result = params[0].axisValue + '<br/>'
-        let total = 0
-        params.forEach((param: any) => {
-          result += param.marker + param.seriesName + ': ' + param.value.toLocaleString() + '<br/>'
-          total += param.value
-        })
-        result += '总计: ' + total.toLocaleString()
-        return result
-      },
     },
     legend: {
       data: ['输入 Token', '输出 Token'],
@@ -297,20 +281,13 @@ function updateDailyChart(data: any) {
     xAxis: {
       type: 'category',
       data: data.dates?.map((d: string) => d.substring(5)) || [],
-      axisLabel: {
-        rotate: 0,
-      },
     },
     yAxis: {
       type: 'value',
       axisLabel: {
         formatter: function (value: number) {
-          if (value >= 1000000) {
-            return (value / 1000000).toFixed(1) + 'M'
-          }
-          if (value >= 1000) {
-            return (value / 1000).toFixed(0) + 'K'
-          }
+          if (value >= 1000000) return (value / 1000000).toFixed(1) + 'M'
+          if (value >= 1000) return (value / 1000).toFixed(0) + 'K'
           return value.toString()
         },
       },
@@ -321,26 +298,23 @@ function updateDailyChart(data: any) {
         type: 'bar',
         stack: 'total',
         data: data.input || [],
-        itemStyle: { color: '#409eff' },
-        barWidth: '40%',
+        itemStyle: { color: '#409eff', borderRadius: [4, 4, 0, 0] },
       },
       {
         name: '输出 Token',
         type: 'bar',
         stack: 'total',
         data: data.output || [],
-        itemStyle: { color: '#67c23a' },
-        barWidth: '40%',
+        itemStyle: { color: '#67c23a', borderRadius: [4, 4, 0, 0] },
       },
     ],
   })
-
-  // 强制重新渲染
-  dailyChart.resize()
 }
 
 function updateModelChart(models: any[]) {
   if (!modelChart || models.length === 0) return
+
+  const colors = ['#409eff', '#67c23a', '#e6a23c', '#f56c6c', '#909399']
 
   modelChart.setOption({
     tooltip: {
@@ -349,35 +323,27 @@ function updateModelChart(models: any[]) {
     },
     legend: {
       orient: 'vertical',
-      left: 'left',
+      right: '5%',
       top: 'center',
     },
     series: [
       {
         type: 'pie',
-        radius: ['40%', '70%'],
-        avoidLabelOverlap: false,
+        radius: ['45%', '75%'],
+        center: ['40%', '50%'],
         itemStyle: {
           borderRadius: 10,
           borderColor: '#fff',
           borderWidth: 2,
         },
-        label: {
-          show: false,
-        },
+        label: { show: false },
         emphasis: {
-          label: {
-            show: true,
-            fontSize: 14,
-            fontWeight: 'bold',
-          },
+          label: { show: true, fontSize: 14, fontWeight: 'bold' },
         },
-        labelLine: {
-          show: false,
-        },
-        data: models.map((m) => ({
+        data: models.map((m, i) => ({
           name: m.model_id,
           value: m.total,
+          itemStyle: { color: colors[i % colors.length] },
         })),
       },
     ],
@@ -385,12 +351,8 @@ function updateModelChart(models: any[]) {
 }
 
 function formatNumber(num: number): string {
-  if (num >= 1000000) {
-    return (num / 1000000).toFixed(1) + 'M'
-  }
-  if (num >= 1000) {
-    return (num / 1000).toFixed(1) + 'K'
-  }
+  if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M'
+  if (num >= 1000) return (num / 1000).toFixed(1) + 'K'
   return num.toString()
 }
 
@@ -399,7 +361,6 @@ function formatDate(dateStr: string) {
 }
 
 function exportRecords() {
-  // TODO: 导出为 CSV
   alert('导出功能开发中...')
 }
 </script>
@@ -416,7 +377,7 @@ function exportRecords() {
 }
 
 .stat-card {
-  height: 140px;
+  border: none;
 }
 
 .stat-item {
@@ -425,32 +386,32 @@ function exportRecords() {
 }
 
 .stat-label {
-  font-size: 14px;
-  color: #909399;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
   margin-bottom: 8px;
 }
 
 .stat-value {
-  font-size: 28px;
-  font-weight: bold;
-  color: #303133;
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
   margin-bottom: 8px;
 }
 
 .stat-detail {
   font-size: 12px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
   display: flex;
   justify-content: center;
   gap: 16px;
 }
 
 .stat-detail .input {
-  color: #409eff;
+  color: var(--el-color-primary);
 }
 
 .stat-detail .output {
-  color: #67c23a;
+  color: var(--el-color-success);
 }
 
 .chart-row {
@@ -458,9 +419,8 @@ function exportRecords() {
 }
 
 .chart-container {
-  height: 350px;
+  height: 300px;
   width: 100%;
-  min-height: 300px;
 }
 
 .card-header {

@@ -119,6 +119,7 @@ const renderedContent = computed(() => {
   font-size: 14px;
   line-height: 1.8;
   word-break: break-word;
+  color: var(--el-text-color-primary);
 }
 
 .markdown-body :deep(h1),
@@ -131,6 +132,7 @@ const renderedContent = computed(() => {
   margin-bottom: 8px;
   font-weight: 600;
   line-height: 1.4;
+  color: var(--el-text-color-primary);
 }
 
 .markdown-body :deep(h1) { font-size: 24px; }
@@ -139,14 +141,16 @@ const renderedContent = computed(() => {
 
 .markdown-body :deep(p) {
   margin-bottom: 8px;
+  color: var(--el-text-color-primary);
 }
 
 .markdown-body :deep(code) {
-  background: #f0f0f0;
+  background: var(--el-fill-color);
   padding: 2px 6px;
   border-radius: 4px;
   font-family: 'Consolas', 'Monaco', monospace;
   font-size: 13px;
+  color: var(--el-text-color-primary);
 }
 
 .markdown-body :deep(.code-block-wrapper) {
@@ -158,9 +162,9 @@ const renderedContent = computed(() => {
   position: absolute;
   top: 8px;
   right: 8px;
-  background: rgba(255, 255, 255, 0.1);
-  color: #d4d4d4;
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: var(--el-fill-color);
+  color: var(--el-text-color-secondary);
+  border: 1px solid var(--el-border-color);
   padding: 4px 12px;
   border-radius: 4px;
   cursor: pointer;
@@ -170,12 +174,13 @@ const renderedContent = computed(() => {
 }
 
 .markdown-body :deep(.copy-btn:hover) {
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-primary);
 }
 
 .markdown-body :deep(pre) {
-  background: #1e1e1e;
-  color: #d4d4d4;
+  background: var(--el-fill-color-dark);
+  color: var(--el-text-color-primary);
   padding: 16px;
   border-radius: 8px;
   overflow-x: auto;
@@ -189,20 +194,22 @@ const renderedContent = computed(() => {
 }
 
 .markdown-body :deep(blockquote) {
-  border-left: 4px solid #409eff;
+  border-left: 4px solid var(--el-color-primary);
   padding-left: 12px;
   margin: 12px 0;
-  color: #606266;
+  color: var(--el-text-color-secondary);
 }
 
 .markdown-body :deep(ul),
 .markdown-body :deep(ol) {
   padding-left: 24px;
   margin: 8px 0;
+  color: var(--el-text-color-primary);
 }
 
 .markdown-body :deep(li) {
   margin: 4px 0;
+  color: var(--el-text-color-primary);
 }
 
 .markdown-body :deep(table) {
@@ -213,18 +220,20 @@ const renderedContent = computed(() => {
 
 .markdown-body :deep(th),
 .markdown-body :deep(td) {
-  border: 1px solid #e0e0e0;
+  border: 1px solid var(--el-border-color);
   padding: 8px 12px;
   text-align: left;
+  color: var(--el-text-color-primary);
 }
 
 .markdown-body :deep(th) {
-  background: #f5f5f5;
+  background: var(--el-fill-color);
   font-weight: 600;
+  color: var(--el-text-color-primary);
 }
 
 .markdown-body :deep(a) {
-  color: #409eff;
+  color: var(--el-color-primary);
   text-decoration: none;
 }
 
@@ -239,13 +248,18 @@ const renderedContent = computed(() => {
 
 .markdown-body :deep(hr) {
   border: none;
-  border-top: 1px solid #e0e0e0;
+  border-top: 1px solid var(--el-border-color);
   margin: 16px 0;
 }
 
 /* 数学公式样式 */
 .markdown-body :deep(.katex) {
   font-size: 1.1em;
+  color: var(--el-text-color-primary);
+}
+
+.markdown-body :deep(.katex-html) {
+  color: var(--el-text-color-primary);
 }
 
 .markdown-body :deep(.formula-block) {
@@ -253,7 +267,7 @@ const renderedContent = computed(() => {
   margin: 16px 0;
   overflow-x: auto;
   text-align: center;
-  background: #f8f8f8;
+  background: var(--el-fill-color);
   padding: 16px;
   border-radius: 8px;
 }
@@ -262,17 +276,29 @@ const renderedContent = computed(() => {
   position: absolute;
   top: 8px;
   right: 8px;
-  background: #e0e0e0;
+  background: var(--el-fill-color-light);
   border: none;
   padding: 4px 12px;
   border-radius: 4px;
   cursor: pointer;
   font-size: 12px;
-  color: #606266;
+  color: var(--el-text-color-secondary);
   transition: all 0.2s;
 }
 
 .markdown-body :deep(.formula-copy-btn:hover) {
-  background: #d0d0d0;
+  background: var(--el-fill-color-dark);
+  color: var(--el-text-color-primary);
+}
+
+/* 确保 KaTeX 内部元素颜色正确 */
+.markdown-body :deep(.katex .mord),
+.markdown-body :deep(.katex .mbin),
+.markdown-body :deep(.katex .mrel),
+.markdown-body :deep(.katex .mopen),
+.markdown-body :deep(.katex .mclose),
+.markdown-body :deep(.katex .mpunct),
+.markdown-body :deep(.katex .mop) {
+  color: var(--el-text-color-primary);
 }
 </style>

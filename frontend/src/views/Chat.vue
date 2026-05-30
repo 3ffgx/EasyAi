@@ -1,243 +1,281 @@
 <template>
   <div class="chat-container">
-    <!-- 对话列表侧边栏 -->
-    <div class="conversation-sidebar">
+    <!-- 侧边栏 -->
+    <aside class="sidebar" :class="{ collapsed: sidebarCollapsed }">
       <div class="sidebar-header">
-        <el-button type="primary" @click="createNewChat" style="width: 100%">
-          <el-icon><Plus /></el-icon>
-          新建对话
-        </el-button>
+        <button class="new-chat-btn" @click="createNewChat">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+          <span v-show="!sidebarCollapsed">新对话</span>
+        </button>
       </div>
 
-      <div class="conversation-list">
+      <div class="conversation-list" v-show="!sidebarCollapsed">
         <div
           v-for="conv in chatStore.conversations"
           :key="conv.id"
-          :class="['conversation-item', { active: chatStore.currentConversation?.id === conv.id }]"
+          class="conversation-item"
+          :class="{ active: chatStore.currentConversation?.id === conv.id }"
           @click="selectConversation(conv)"
         >
+          <div class="conv-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+            </svg>
+          </div>
           <div class="conv-info">
             <div class="conv-title">{{ conv.title || '新对话' }}</div>
-            <div class="conv-meta">
-              <span class="conv-model">{{ getModelName(conv.model_id) }}</span>
-              <span class="conv-time">{{ formatTime(conv.last_message_at || conv.updated_at || conv.created_at) }}</span>
-            </div>
-            <div class="conv-stats">{{ conv.message_count || 0 }} 条消息</div>
+            <div class="conv-meta">{{ getModelName(conv.model_id) }}</div>
           </div>
-          <el-button
-            type="danger"
-            link
-            @click.stop="deleteConversation(conv.id)"
-          >
-            <el-icon><Delete /></el-icon>
-          </el-button>
+          <button class="conv-delete" @click.stop="deleteConversation(conv.id)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            </svg>
+          </button>
         </div>
       </div>
-    </div>
 
-    <!-- 聊天区域 -->
-    <div class="chat-main">
+      <div class="sidebar-footer" v-show="!sidebarCollapsed">
+        <button class="sidebar-btn" @click="router.push('/usage')">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+          </svg>
+          使用量
+        </button>
+        <button class="sidebar-btn" @click="router.push('/settings')">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+          设置
+        </button>
+      </div>
+    </aside>
+
+    <!-- 主聊天区域 -->
+    <main class="chat-main">
       <!-- 顶部栏 -->
-      <div class="chat-header">
-        <el-select
-          v-model="chatStore.selectedModel"
-          placeholder="选择模型"
-          style="width: 200px"
-        >
-          <el-option
-            v-for="model in availableModels"
-            :key="model.id"
-            :label="model.name"
-            :value="model.id"
-          />
-        </el-select>
-      </div>
+      <header class="chat-header">
+        <button class="toggle-sidebar" @click="sidebarCollapsed = !sidebarCollapsed">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="3" y1="12" x2="21" y2="12"></line>
+            <line x1="3" y1="6" x2="21" y2="6"></line>
+            <line x1="3" y1="18" x2="21" y2="18"></line>
+          </svg>
+        </button>
 
-      <!-- 消息列表 -->
-      <div class="message-list" ref="messageListRef">
-        <div v-if="chatStore.messages.length === 0" class="empty-state">
-          <el-icon :size="64" color="#c0c4cc"><ChatLineRound /></el-icon>
-          <p>开始新的对话</p>
+        <div class="model-selector">
+          <select v-model="chatStore.selectedModel" class="model-select">
+            <option v-for="model in availableModels" :key="model.id" :value="model.id">
+              {{ model.name }}
+            </option>
+          </select>
         </div>
 
-        <div
-          v-for="msg in chatStore.messages"
-          :key="msg.id"
-          :class="['message', msg.role]"
-        >
-          <div class="message-avatar">
-            <el-avatar :size="36" :icon="msg.role === 'user' ? 'User' : 'Service'" />
+        <div class="header-actions">
+          <button class="action-btn" @click="router.push('/dashboard')">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="7" height="7"></rect>
+              <rect x="14" y="3" width="7" height="7"></rect>
+              <rect x="14" y="14" width="7" height="7"></rect>
+              <rect x="3" y="14" width="7" height="7"></rect>
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <!-- 消息区域 -->
+      <div class="messages-container" ref="messagesContainer">
+        <!-- 空状态 -->
+        <div v-if="chatStore.messages.length === 0 && !chatStore.isLoading" class="empty-state">
+          <div class="empty-icon">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+            </svg>
           </div>
-          <div class="message-content">
-            <!-- 思考过程（可折叠） -->
-            <div v-if="msg.reasoning" class="reasoning-section">
-              <el-collapse>
-                <el-collapse-item title="思考过程" name="reasoning">
-                  <div class="reasoning-text">{{ msg.reasoning }}</div>
-                </el-collapse-item>
-              </el-collapse>
-            </div>
-            <!-- 回答内容（Markdown 渲染） -->
-            <div class="message-text">
-              <MarkdownRenderer :content="msg.content" />
-            </div>
-            <div class="message-meta">
-              <span v-if="msg.tokens_used">{{ msg.tokens_used }} tokens</span>
-            </div>
+          <h2>开始新对话</h2>
+          <p>选择一个模型，然后输入你的问题</p>
+
+          <div class="quick-actions">
+            <button class="quick-btn" @click="sendQuickMessage('帮我解释一下量子计算')">
+              <span class="quick-icon">🔬</span>
+              解释量子计算
+            </button>
+            <button class="quick-btn" @click="sendQuickMessage('写一首关于春天的诗')">
+              <span class="quick-icon">✍️</span>
+              写一首诗
+            </button>
+            <button class="quick-btn" @click="sendQuickMessage('用 Python 实现快速排序')">
+              <span class="quick-icon">💻</span>
+              写排序算法
+            </button>
+            <button class="quick-btn" @click="sendQuickMessage('解释相对论')">
+              <span class="quick-icon">🌌</span>
+              解释相对论
+            </button>
           </div>
         </div>
 
-        <!-- 流式消息（正在生成） -->
-        <div v-if="chatStore.isLoading" class="message assistant">
-          <div class="message-avatar">
-            <el-avatar :size="36" icon="Service" />
+        <!-- 消息列表 -->
+        <div v-else class="messages-list">
+          <div
+            v-for="(msg, index) in chatStore.messages"
+            :key="msg.id"
+            class="message"
+            :class="[msg.role, { 'animate-in': index === chatStore.messages.length - 1 }]"
+          >
+            <div class="message-avatar">
+              <div v-if="msg.role === 'user'" class="avatar user-avatar">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+                </svg>
+              </div>
+              <div v-else class="avatar ai-avatar">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                </svg>
+              </div>
+            </div>
+
+            <div class="message-content">
+              <!-- 思考过程 -->
+              <div v-if="msg.reasoning" class="reasoning-section">
+                <button class="reasoning-toggle" @click="toggleReasoning(msg.id)">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{ expanded: expandedReasoning[msg.id] }">
+                    <polyline points="6 9 12 15 18 9"></polyline>
+                  </svg>
+                  思考过程
+                </button>
+                <div v-show="expandedReasoning[msg.id]" class="reasoning-content">
+                  {{ msg.reasoning }}
+                </div>
+              </div>
+
+              <!-- 消息内容 -->
+              <div class="message-text">
+                <MarkdownRenderer v-if="msg.role === 'assistant'" :content="msg.content" />
+                <span v-else>{{ msg.content }}</span>
+              </div>
+
+              <!-- 操作栏 -->
+              <div class="message-actions" v-if="msg.role === 'assistant'">
+                <button class="action-btn" @click="copyMessage(msg.content)" title="复制">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                  </svg>
+                </button>
+                <button class="action-btn" @click="regenerate(msg.id)" title="重新生成">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="23 4 23 10 17 10"></polyline>
+                    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                  </svg>
+                </button>
+              </div>
+            </div>
           </div>
-          <div class="message-content">
-            <!-- 思考过程（可折叠） -->
-            <div v-if="chatStore.streamingReasoning" class="reasoning-section">
-              <el-collapse>
-                <el-collapse-item title="正在思考..." name="reasoning">
-                  <div class="reasoning-text">{{ chatStore.streamingReasoning }}</div>
-                </el-collapse-item>
-              </el-collapse>
+
+          <!-- 流式消息 -->
+          <div v-if="chatStore.isLoading" class="message assistant animate-in">
+            <div class="message-avatar">
+              <div class="avatar ai-avatar loading">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                </svg>
+              </div>
             </div>
-            <!-- 回答内容（Markdown 渲染） -->
-            <div v-if="chatStore.streamingMessage" class="message-text">
-              <MarkdownRenderer :content="chatStore.streamingMessage" />
-            </div>
-            <!-- 加载状态 -->
-            <div v-if="!chatStore.streamingMessage && !chatStore.streamingReasoning" class="typing-indicator">
-              <span></span>
-              <span></span>
-              <span></span>
-            </div>
-            <!-- 停止按钮 -->
-            <div class="message-actions">
-              <el-button
-                type="danger"
-                size="small"
-                @click="stopGeneration"
-              >
-                <el-icon><VideoPause /></el-icon>
+
+            <div class="message-content">
+              <!-- 思考中 -->
+              <div v-if="chatStore.streamingReasoning" class="reasoning-section">
+                <button class="reasoning-toggle active">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="rotating">
+                    <path d="M21 12a9 9 0 1 1-6.219-8.56"></path>
+                  </svg>
+                  思考中...
+                </button>
+                <div class="reasoning-content">
+                  {{ chatStore.streamingReasoning }}
+                </div>
+              </div>
+
+              <!-- 回复中 -->
+              <div v-if="chatStore.streamingMessage" class="message-text">
+                <MarkdownRenderer :content="chatStore.streamingMessage" />
+              </div>
+
+              <!-- 加载指示器 -->
+              <div v-if="!chatStore.streamingMessage && !chatStore.streamingReasoning" class="typing-indicator">
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
+
+              <!-- 停止按钮 -->
+              <button class="stop-btn" @click="stopGeneration">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                  <rect x="6" y="6" width="12" height="12" rx="2"></rect>
+                </svg>
                 停止生成
-              </el-button>
+              </button>
             </div>
           </div>
         </div>
       </div>
 
       <!-- 输入区域 -->
-      <div class="input-area">
-        <el-input
-          v-model="inputMessage"
-          type="textarea"
-          :rows="3"
-          placeholder="输入消息... (Enter 发送, Shift+Enter 换行)"
-          resize="none"
-          @keydown="handleKeydown"
-          :disabled="chatStore.isLoading"
-        />
-        <el-button
-          type="primary"
-          :loading="chatStore.isLoading"
-          @click="sendMessage"
-          :disabled="!inputMessage.trim()"
-        >
-          发送
-        </el-button>
-      </div>
-    </div>
-
-    <!-- 对话索引侧边栏 -->
-    <div class="index-sidebar" v-if="userQuestions.length > 0">
-      <div class="index-header">
-        <span>对话索引</span>
-        <el-button link @click="showIndex = !showIndex">
-          <el-icon><Fold v-if="showIndex" /><Expand v-else /></el-icon>
-        </el-button>
-      </div>
-      <div class="index-list" v-show="showIndex">
-        <div
-          v-for="(item, index) in userQuestions"
-          :key="index"
-          class="index-item"
-          @click="scrollToQuestion(index)"
-        >
-          <div class="index-number">{{ index + 1 }}</div>
-          <div class="index-text">{{ item.question }}</div>
+      <div class="input-container">
+        <div class="input-wrapper">
+          <textarea
+            v-model="inputMessage"
+            class="message-input"
+            placeholder="输入你的问题..."
+            rows="1"
+            @keydown="handleKeydown"
+            @input="autoResize"
+            ref="inputRef"
+            :disabled="chatStore.isLoading"
+          ></textarea>
+          <button
+            class="send-btn"
+            :class="{ active: inputMessage.trim() && !chatStore.isLoading }"
+            @click="sendMessage"
+            :disabled="!inputMessage.trim() || chatStore.isLoading"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="22" y1="2" x2="11" y2="13"></line>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+            </svg>
+          </button>
+        </div>
+        <div class="input-footer">
+          <span class="model-info">{{ getModelName(chatStore.selectedModel) }}</span>
+          <span class="char-count" v-if="inputMessage.length > 0">{{ inputMessage.length }} 字</span>
         </div>
       </div>
-    </div>
+    </main>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick, watch } from 'vue'
+import { ref, onMounted, nextTick, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { useChatStore } from '@/stores/chat'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import MarkdownRenderer from '@/components/MarkdownRenderer.vue'
 import api from '@/api'
 
+const router = useRouter()
 const chatStore = useChatStore()
+
 const inputMessage = ref('')
-const messageListRef = ref<HTMLElement>()
-const showIndex = ref(true)
-
-// 可用模型列表
+const messagesContainer = ref<HTMLElement>()
+const inputRef = ref<HTMLTextAreaElement>()
+const sidebarCollapsed = ref(false)
 const availableModels = ref<{ id: string; name: string }[]>([])
-
-// 用户问题列表（对话索引）
-const userQuestions = computed(() => {
-  return chatStore.messages
-    .filter(msg => msg.role === 'user')
-    .map((msg, index) => ({
-      question: msg.content.length > 30 ? msg.content.substring(0, 30) + '...' : msg.content,
-      fullContent: msg.content,
-      index: index,
-    }))
-})
-
-// 滚动到指定问题
-function scrollToQuestion(index: number) {
-  const messageElements = messageListRef.value?.querySelectorAll('.message.user')
-  if (messageElements && messageElements[index]) {
-    messageElements[index].scrollIntoView({ behavior: 'smooth', block: 'center' })
-  }
-}
-
-// 获取模型显示名称
-function getModelName(modelId: string): string {
-  const model = availableModels.value.find(m => m.id === modelId)
-  return model?.name || modelId
-}
-
-// 格式化时间
-function formatTime(dateStr: string | undefined): string {
-  if (!dateStr) return ''
-  const date = new Date(dateStr)
-  const now = new Date()
-  const diff = now.getTime() - date.getTime()
-
-  // 今天内显示时间
-  if (diff < 24 * 60 * 60 * 1000 && date.getDate() === now.getDate()) {
-    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-  }
-
-  // 昨天
-  const yesterday = new Date(now)
-  yesterday.setDate(yesterday.getDate() - 1)
-  if (date.getDate() === yesterday.getDate() && date.getMonth() === yesterday.getMonth()) {
-    return '昨天'
-  }
-
-  // 今年内显示月日
-  if (date.getFullYear() === now.getFullYear()) {
-    return `${date.getMonth() + 1}月${date.getDate()}日`
-  }
-
-  // 其他显示年月日
-  return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`
-}
+const expandedReasoning = ref<Record<string, boolean>>({})
 
 onMounted(async () => {
   await chatStore.fetchConversations()
@@ -248,7 +286,6 @@ async function fetchModels() {
   try {
     const response = await api.get('/api/models')
     availableModels.value = response.data
-    // 如果当前选择的模型不在列表中，选择第一个
     if (availableModels.value.length > 0 && !availableModels.value.find(m => m.id === chatStore.selectedModel)) {
       chatStore.selectedModel = availableModels.value[0].id
     }
@@ -257,17 +294,14 @@ async function fetchModels() {
   }
 }
 
-// 监听消息变化，自动滚动到底部
-watch(
-  () => [chatStore.messages.length, chatStore.streamingMessage],
-  () => {
-    nextTick(() => {
-      if (messageListRef.value) {
-        messageListRef.value.scrollTop = messageListRef.value.scrollHeight
-      }
-    })
-  }
-)
+function getModelName(modelId: string): string {
+  const model = availableModels.value.find(m => m.id === modelId)
+  return model?.name || modelId
+}
+
+function toggleReasoning(msgId: string) {
+  expandedReasoning.value[msgId] = !expandedReasoning.value[msgId]
+}
 
 async function createNewChat() {
   await chatStore.createConversation()
@@ -275,13 +309,16 @@ async function createNewChat() {
 
 async function selectConversation(conv: any) {
   await chatStore.selectConversation(conv)
+  scrollToBottom()
 }
 
 async function deleteConversation(id: string) {
-  await ElMessageBox.confirm('确定删除这个对话吗？', '确认', {
-    type: 'warning',
-  })
-  await chatStore.deleteConversation(id)
+  try {
+    await chatStore.deleteConversation(id)
+    ElMessage.success('对话已删除')
+  } catch {
+    ElMessage.error('删除失败')
+  }
 }
 
 function handleKeydown(e: KeyboardEvent) {
@@ -291,42 +328,107 @@ function handleKeydown(e: KeyboardEvent) {
   }
 }
 
+function autoResize() {
+  const textarea = inputRef.value
+  if (textarea) {
+    textarea.style.height = 'auto'
+    textarea.style.height = Math.min(textarea.scrollHeight, 200) + 'px'
+  }
+}
+
 async function sendMessage() {
   const content = inputMessage.value.trim()
   if (!content || chatStore.isLoading) return
 
   inputMessage.value = ''
+  if (inputRef.value) {
+    inputRef.value.style.height = 'auto'
+  }
+
   try {
     await chatStore.sendMessage(content)
+    scrollToBottom()
   } catch (error) {
     ElMessage.error('发送失败，请重试')
   }
 }
 
+async function sendQuickMessage(content: string) {
+  inputMessage.value = content
+  await sendMessage()
+}
+
 function stopGeneration() {
   chatStore.cancelRequest()
 }
+
+function copyMessage(content: string) {
+  navigator.clipboard.writeText(content)
+  ElMessage.success('已复制')
+}
+
+function regenerate(msgId: string) {
+  // TODO: 重新生成
+  ElMessage.info('重新生成功能开发中')
+}
+
+function scrollToBottom() {
+  nextTick(() => {
+    if (messagesContainer.value) {
+      messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
+    }
+  })
+}
+
+watch(() => chatStore.streamingMessage, scrollToBottom)
+watch(() => chatStore.streamingReasoning, scrollToBottom)
 </script>
 
 <style scoped>
 .chat-container {
   display: flex;
-  height: calc(100vh - 112px);
-  background: white;
-  border-radius: 8px;
+  height: 100vh;
+  background: var(--el-bg-color);
+}
+
+/* ===== 侧边栏 ===== */
+.sidebar {
+  width: 260px;
+  background: var(--el-bg-color-overlay);
+  border-right: 1px solid var(--el-border-color);
+  display: flex;
+  flex-direction: column;
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
 }
 
-.conversation-sidebar {
-  width: 280px;
-  border-right: 1px solid #e8e8e8;
-  display: flex;
-  flex-direction: column;
+.sidebar.collapsed {
+  width: 60px;
 }
 
 .sidebar-header {
-  padding: 16px;
-  border-bottom: 1px solid #e8e8e8;
+  padding: 12px;
+  border-bottom: 1px solid var(--el-border-color);
+}
+
+.new-chat-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: var(--el-fill-color);
+  border: 1px solid var(--el-border-color);
+  border-radius: 12px;
+  color: var(--el-text-color-primary);
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.15s ease;
+}
+
+.new-chat-btn:hover {
+  background: var(--el-fill-color-light);
+  border-color: var(--el-text-color-secondary);
 }
 
 .conversation-list {
@@ -338,18 +440,25 @@ function stopGeneration() {
 .conversation-item {
   display: flex;
   align-items: center;
-  padding: 12px;
-  border-radius: 8px;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 6px;
   cursor: pointer;
-  margin-bottom: 4px;
+  transition: all 0.15s ease;
+  margin-bottom: 2px;
 }
 
 .conversation-item:hover {
-  background: #f5f7fa;
+  background: var(--el-fill-color);
 }
 
 .conversation-item.active {
-  background: #ecf5ff;
+  background: var(--el-fill-color-light);
+}
+
+.conv-icon {
+  color: var(--el-text-color-secondary);
+  flex-shrink: 0;
 }
 
 .conv-info {
@@ -358,55 +467,151 @@ function stopGeneration() {
 }
 
 .conv-title {
-  font-size: 14px;
-  color: #303133;
+  font-size: 13px;
+  color: var(--el-text-color-primary);
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-  margin-bottom: 4px;
 }
 
 .conv-meta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.conv-model {
   font-size: 11px;
-  color: #909399;
-  background: #f0f0f0;
-  padding: 1px 6px;
-  border-radius: 4px;
-}
-
-.conv-time {
-  font-size: 11px;
-  color: #909399;
-}
-
-.conv-stats {
-  font-size: 11px;
-  color: #c0c4cc;
+  color: var(--el-text-color-secondary);
   margin-top: 2px;
 }
 
+.conv-delete {
+  opacity: 0;
+  background: none;
+  border: none;
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+.conversation-item:hover .conv-delete {
+  opacity: 1;
+}
+
+.conv-delete:hover {
+  color: var(--el-color-danger);
+  background: var(--el-color-danger-light-9);
+}
+
+.sidebar-footer {
+  padding: 12px;
+  border-top: 1px solid var(--el-border-color);
+}
+
+.sidebar-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  color: var(--el-text-color-regular);
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.15s ease;
+}
+
+.sidebar-btn:hover {
+  background: var(--el-fill-color);
+  color: var(--el-text-color-primary);
+}
+
+/* ===== 主聊天区域 ===== */
 .chat-main {
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 
 .chat-header {
-  padding: 12px 16px;
-  border-bottom: 1px solid #e8e8e8;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--el-border-color);
+  background: var(--el-bg-color-overlay);
 }
 
-.message-list {
+.toggle-sidebar {
+  background: none;
+  border: none;
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+}
+
+.toggle-sidebar:hover {
+  background: var(--el-fill-color);
+  color: var(--el-text-color-primary);
+}
+
+.model-selector {
+  flex: 1;
+}
+
+.model-select {
+  background: var(--el-fill-color);
+  border: 1px solid var(--el-border-color);
+  border-radius: 6px;
+  color: var(--el-text-color-primary);
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.15s ease;
+}
+
+.model-select:hover {
+  border-color: var(--el-text-color-secondary);
+}
+
+.model-select:focus {
+  border-color: var(--el-color-primary);
+}
+
+.model-select option {
+  background: var(--el-bg-color-overlay);
+  color: var(--el-text-color-primary);
+}
+
+.header-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.action-btn {
+  background: none;
+  border: none;
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+}
+
+.action-btn:hover {
+  background: var(--el-fill-color);
+  color: var(--el-text-color-primary);
+}
+
+/* ===== 消息区域 ===== */
+.messages-container {
   flex: 1;
   overflow-y: auto;
-  padding: 24px;
+  padding: 0;
 }
 
 .empty-state {
@@ -415,105 +620,212 @@ function stopGeneration() {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  color: #909399;
+  padding: 40px;
+  animation: fadeIn 0.5s ease;
+}
+
+.empty-icon {
+  width: 80px;
+  height: 80px;
+  background: var(--el-fill-color);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--el-text-color-secondary);
+  margin-bottom: 24px;
+}
+
+.empty-state h2 {
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+  margin-bottom: 8px;
 }
 
 .empty-state p {
-  margin-top: 16px;
-  font-size: 16px;
+  color: var(--el-text-color-secondary);
+  margin-bottom: 32px;
+}
+
+.quick-actions {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  max-width: 500px;
+}
+
+.quick-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  background: var(--el-bg-color-overlay);
+  border: 1px solid var(--el-border-color);
+  border-radius: 12px;
+  color: var(--el-text-color-primary);
+  cursor: pointer;
+  font-size: 13px;
+  text-align: left;
+  transition: all 0.15s ease;
+}
+
+.quick-btn:hover {
+  background: var(--el-fill-color);
+  border-color: var(--el-text-color-secondary);
+  transform: translateY(-2px);
+}
+
+.quick-icon {
+  font-size: 20px;
+}
+
+/* ===== 消息列表 ===== */
+.messages-list {
+  padding: 24px 0;
 }
 
 .message {
   display: flex;
-  gap: 12px;
-  margin-bottom: 24px;
+  gap: 16px;
+  padding: 24px 24px;
+  transition: background 0.15s ease;
+}
+
+.message.assistant {
+  background: var(--el-fill-color-lighter);
 }
 
 .message.user {
-  flex-direction: row-reverse;
+  background: transparent;
 }
 
-.message-content {
-  max-width: 70%;
+.message.animate-in {
+  animation: slideUp 0.3s ease;
 }
 
-.message.user .message-content {
-  text-align: right;
+.message-avatar {
+  flex-shrink: 0;
 }
 
-.message-text {
-  padding: 12px 16px;
-  border-radius: 12px;
-  font-size: 14px;
-  line-height: 1.6;
-  word-break: break-word;
-  overflow: hidden;
+.avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.message.assistant .message-text {
-  background: #f5f7fa;
-  color: #303133;
-}
-
-.message.user .message-text {
-  background: #409eff;
+.user-avatar {
+  background: var(--el-color-primary);
   color: white;
 }
 
-.message-meta {
-  font-size: 12px;
-  color: #909399;
-  margin-top: 4px;
+.ai-avatar {
+  background: var(--el-color-success);
+  color: white;
 }
 
-.message-actions {
-  margin-top: 8px;
+.ai-avatar.loading {
+  animation: pulse 2s infinite;
 }
 
+.message-content {
+  flex: 1;
+  min-width: 0;
+  max-width: 800px;
+}
+
+/* ===== 思考过程 ===== */
 .reasoning-section {
-  margin-bottom: 8px;
+  margin-bottom: 12px;
 }
 
-.reasoning-section :deep(.el-collapse-item__header) {
+.reasoning-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
   font-size: 12px;
-  color: #909399;
-  background: #f0f0f0;
-  padding: 0 12px;
-  height: 32px;
-  line-height: 32px;
-  border-radius: 4px;
+  padding: 4px 0;
+  transition: color 0.15s ease;
 }
 
-.reasoning-section :deep(.el-collapse-item__content) {
-  padding: 0;
+.reasoning-toggle:hover {
+  color: var(--el-text-color-regular);
 }
 
-.reasoning-text {
-  font-size: 12px;
-  color: #606266;
-  background: #f5f5f5;
-  padding: 8px 12px;
-  border-radius: 4px;
-  white-space: pre-wrap;
-  line-height: 1.5;
+.reasoning-toggle svg {
+  transition: transform 0.15s ease;
+}
+
+.reasoning-toggle svg.expanded {
+  transform: rotate(180deg);
+}
+
+.reasoning-toggle svg.rotating {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.reasoning-content {
+  margin-top: 8px;
+  padding: 12px 16px;
+  background: var(--el-fill-color);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+  line-height: 1.6;
   max-height: 200px;
   overflow-y: auto;
 }
 
+/* ===== 消息内容 ===== */
+.message-text {
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--el-text-color-primary);
+  word-break: break-word;
+}
+
+.message-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 8px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.message:hover .message-actions {
+  opacity: 1;
+}
+
+.message-actions .action-btn {
+  padding: 6px;
+  font-size: 12px;
+}
+
+/* ===== 打字指示器 ===== */
 .typing-indicator {
   display: flex;
   gap: 4px;
-  padding: 12px 16px;
-  background: #f5f7fa;
-  border-radius: 12px;
+  padding: 8px 0;
 }
 
 .typing-indicator span {
   width: 8px;
   height: 8px;
-  background: #c0c4cc;
+  background: var(--el-text-color-secondary);
   border-radius: 50%;
-  animation: typing 1.4s infinite both;
+  animation: typing 1.4s infinite;
 }
 
 .typing-indicator span:nth-child(2) {
@@ -524,86 +836,124 @@ function stopGeneration() {
   animation-delay: 0.4s;
 }
 
-@keyframes typing {
-  0%, 100% {
-    opacity: 0.3;
-    transform: scale(0.8);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-.input-area {
-  padding: 16px;
-  border-top: 1px solid #e8e8e8;
-  display: flex;
-  gap: 12px;
-  align-items: flex-end;
-}
-
-.input-area .el-textarea {
-  flex: 1;
-}
-
-/* 对话索引样式 */
-.index-sidebar {
-  width: 240px;
-  border-left: 1px solid #e8e8e8;
-  background: #fafafa;
-  display: flex;
-  flex-direction: column;
-}
-
-.index-header {
-  padding: 12px 16px;
-  border-bottom: 1px solid #e8e8e8;
+.stop-btn {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  font-weight: 600;
-  font-size: 14px;
-}
-
-.index-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 8px;
-}
-
-.index-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 8px 12px;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--el-fill-color);
+  border: 1px solid var(--el-border-color);
   border-radius: 6px;
+  color: var(--el-text-color-secondary);
   cursor: pointer;
-  margin-bottom: 4px;
-  transition: background 0.2s;
+  font-size: 12px;
+  margin-top: 12px;
+  transition: all 0.15s ease;
 }
 
-.index-item:hover {
-  background: #ecf5ff;
+.stop-btn:hover {
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-primary);
 }
 
-.index-number {
-  min-width: 20px;
-  height: 20px;
-  background: #409eff;
-  color: white;
+/* ===== 输入区域 ===== */
+.input-container {
+  padding: 16px 24px 24px;
+  background: var(--el-bg-color);
+}
+
+.input-wrapper {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  background: var(--el-fill-color);
+  border: 1px solid var(--el-border-color);
+  border-radius: 16px;
+  padding: 8px 12px;
+  transition: border-color 0.15s ease;
+}
+
+.input-wrapper:focus-within {
+  border-color: var(--el-color-primary);
+}
+
+.message-input {
+  flex: 1;
+  background: none;
+  border: none;
+  color: var(--el-text-color-primary);
+  font-size: 15px;
+  line-height: 1.5;
+  resize: none;
+  outline: none;
+  max-height: 200px;
+  padding: 4px 0;
+}
+
+.message-input::placeholder {
+  color: var(--el-text-color-placeholder);
+}
+
+.send-btn {
+  width: 36px;
+  height: 36px;
+  background: var(--el-fill-color);
+  border: none;
   border-radius: 50%;
+  color: var(--el-text-color-secondary);
+  cursor: not-allowed;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
-  font-weight: 600;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
 }
 
-.index-text {
-  font-size: 12px;
-  color: #606266;
-  line-height: 1.4;
-  word-break: break-all;
+.send-btn.active {
+  background: var(--el-color-primary);
+  color: white;
+  cursor: pointer;
+}
+
+.send-btn.active:hover {
+  opacity: 0.9;
+  transform: scale(1.05);
+}
+
+.input-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 8px;
+  padding: 0 4px;
+}
+
+.model-info {
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+}
+
+.char-count {
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+}
+
+/* ===== 响应式 ===== */
+@media (max-width: 768px) {
+  .sidebar {
+    position: fixed;
+    z-index: 100;
+    height: 100%;
+    transform: translateX(-100%);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .sidebar:not(.collapsed) {
+    transform: translateX(0);
+  }
+
+  .quick-actions {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

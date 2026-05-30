@@ -143,8 +143,10 @@ async def get_daily_usage(
     db: AsyncSession = Depends(get_db),
 ):
     """获取每日 token 使用量统计（用于图表）"""
-    now = datetime.utcnow()
+    # 使用本地时间
+    now = datetime.now()
     start_date = now - timedelta(days=days)
+    start_date = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
 
     result = await db.execute(
         select(
@@ -170,13 +172,13 @@ async def get_daily_usage(
             "total": int(row[3]),
         }
 
-    # 填充缺失的日期
+    # 填充缺失的日期（包含今天）
     dates = []
     inputs = []
     outputs = []
     totals = []
 
-    for i in range(days):
+    for i in range(days + 1):
         date = (start_date + timedelta(days=i)).strftime("%Y-%m-%d")
         dates.append(date)
         data = daily_data.get(date, {"input": 0, "output": 0, "total": 0})

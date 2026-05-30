@@ -40,6 +40,9 @@ class ChatService:
     async def _stream_deepseek(
         self, model_config: ModelConfig, messages: List[Dict]
     ) -> AsyncGenerator[Dict, None]:
+        tokens_input = 0
+        tokens_output = 0
+
         async with httpx.AsyncClient() as client:
             async with client.stream(
                 "POST",
@@ -60,11 +63,17 @@ class ChatService:
                     if line.startswith("data: "):
                         data = line[6:]
                         if data == "[DONE]":
-                            yield {"type": "done"}
+                            yield {"type": "done", "tokens_input": tokens_input, "tokens_output": tokens_output}
                             break
 
                         try:
                             chunk = json.loads(data)
+                            # 提取 usage 信息
+                            if "usage" in chunk:
+                                usage = chunk["usage"]
+                                tokens_input = usage.get("prompt_tokens", 0)
+                                tokens_output = usage.get("completion_tokens", 0)
+
                             if "choices" in chunk and len(chunk["choices"]) > 0:
                                 delta = chunk["choices"][0].get("delta", {})
                                 content = delta.get("content")
